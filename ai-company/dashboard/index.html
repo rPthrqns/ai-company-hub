@@ -366,6 +366,7 @@ function renderCompany(c){
       let btns='';
       if(t.status==='running') btns=`<button class="rtask-btn" onclick="taskAction('pause','${t.id}')">⏸ 대기</button><button class="rtask-btn" onclick="taskAction('stop','${t.id}')">⏹ 중지</button>`;
       else if(t.status==='paused') btns=`<button class="rtask-btn" onclick="taskAction('resume','${t.id}')">▶ 재개</button><button class="rtask-btn" onclick="taskAction('stop','${t.id}')">⏹ 중지</button>`;
+      btns+=`<button class="rtask-btn" style="margin-left:auto;color:#ef4444;border-color:#7f1d1d" onclick="deleteTask('${t.id}','${t.title.replace(/'/g,"\\'")}')">🗑 삭제</button>`;
       return `<div class="rtask-card ${t.status}"><div class="rtask-top"><span>${t.agent_emoji}</span><span class="rtask-title" title="${t.title}">${t.title}</span><span class="rtask-status">${s}</span></div><div class="rtask-meta">${intLbl}마다 · 마지막: ${lastR} · 다음: ${nextR}</div>${lastResult?`<div class="rtask-result" title="${lastResult.replace(/"/g,'&quot;')}">💬 ${lastResult}</div>`:''}<div class="rtask-actions">${btns}</div></div>`;
     }).join('');
   } else {
@@ -503,6 +504,14 @@ async function taskAction(action,taskId){
     await fetch(`/api/${endpoint}/${currentCompany}/${taskId}`,{method:'POST'});
     refreshCompany();
   }catch(e){toast('작업 상태 변경 실패')}
+}
+
+async function deleteTask(taskId,title){
+  if(!confirm(`"${title}" 작업을 삭제하시겠습니까?`))return;
+  try{
+    const res=await fetch(`/api/task-delete/${currentCompany}/${taskId}`,{method:'POST'});
+    if(res.ok){toast(`🗑 "${title}" 삭제됨`);refreshCompany()}
+  }catch(e){toast('삭제 실패')}
 }
 
 renderLangSwitch();applyLang();load();setInterval(refreshCompany,3000);

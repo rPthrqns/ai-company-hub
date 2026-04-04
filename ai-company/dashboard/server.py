@@ -599,18 +599,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             for target in targets:
                 threading.Thread(target=trigger_processor, args=(cid, text, target.upper()), daemon=True).start()
 
-            # Auto-detect recurring task intent
-            task_info = detect_task_intent(text, company)
-            if task_info:
-                task = add_recurring_task(cid, task_info['title'], task_info['prompt'],
-                                          task_info['interval_minutes'], task_info['agent_id'],
-                                          task_info['agent_name'], task_info['agent_emoji'])
-                if task:
-                    company = get_company(cid)  # re-read
-                    company["chat"].append({"type": "system", "from": "시스템", "emoji": "🔄", "to": "",
-                        "text": f"🔄 정기 작업 생성: \"{task['title']}\" ({task['interval_minutes']}분마다, {task['agent_emoji']} {task['agent_name']})"})
-                    company["activity_log"].append({"time": time_str, "agent": "시스템", "text": f"🔄 정기 작업: {task['title']}"})
-                    update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
+            # NOTE: Auto-detect disabled — tasks are created by agents via /api/task-add only
+            # task_info = detect_task_intent(text, company)
 
             update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
             self._json({"ok": True, "msg": msg, "target": target})
@@ -751,6 +741,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             parts = self.path.split('/')
             cid, task_id = parts[-2], parts[-1]
             update_task_status(cid, task_id, 'resumed')
+            self._json({"ok": True})
+
+        elif self.path.startswith('/api/task-delete/'):
+            parts = self.path.split('/')
+            cid, task_id = parts[-2], parts[-1]
+            company = get_company(cid)
+            if not company: self._json({"error": "not found"}, 404); return
+            tasks = company.get('recurring_tasks', [])
+            task = next((t for t in tasks if t['id'] == task_id), None)
+            if not task: self._json({"error": "task not found"}, 404); return
+            company['recurring_tasks'] = [t for t in tasks if t['id'] != task_id]
+            _running_task_threads.discard(f"{cid}:{task_id}")
+            now = datetime.now().strftime('%H:%M')
+            company['activity_log'].append({"time": now, "agent": "시스템", "text": f"🗑️ 작업 삭제: \"{task['title']}\""})
+            update_company(cid, {"recurring_tasks": company['recurring_tasks'], "activity_log": company['activity_log']})
             self._json({"ok": True})
 
         elif self.path.startswith('/api/task-stop/'):
