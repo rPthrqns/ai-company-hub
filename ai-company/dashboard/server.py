@@ -150,6 +150,11 @@ def _register_and_activate(agent_id, workspace, name, role):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15
             )
         except: pass
+    # Remove BOOTSTRAP.md AFTER registration (agents add may recreate it)
+    import shutil
+    bootstrap = Path(workspace) / "BOOTSTRAP.md"
+    if bootstrap.exists():
+        bootstrap.unlink()
     try:
         subprocess.run(
             ['openclaw', 'agent', '--agent', agent_id, '--local',
@@ -1042,7 +1047,30 @@ def trigger_processor(cid, text, target):
         PROCESSORS.pop(lock_key, None)
         _update_agent_status('active')
 
+def ensure_agents_registered():
+    """On startup, re-register all agents from companies data."""
+    companies = load_json(COMPANIES_FILE, [])
+    for company in companies:
+        cid = company['id']
+        for agent in company.get('agents', []):
+            agent_id = agent.get('agent_id', '')
+            if not agent_id:
+                continue
+            # Check if already registered
+            result = subprocess.run(['openclaw', 'agents', 'list'], capture_output=True, text=True, timeout=10)
+            if agent_id not in result.stdout:
+                print(f"[INIT] Re-registering {agent_id}...")
+                ws = DATA / cid / "workspaces" / agent['id']
+                # Remove BOOTSTRAP.md to prevent identity loss
+                bootstrap = ws / "BOOTSTRAP.md"
+                if bootstrap.exists():
+                    bootstrap.unlink()
+                register_agent(agent_id, ws, agent['name'], agent['role'],
+                               company.get('name', ''), agent.get('emoji', '🤖'), wait=True)
+                agent['status'] = 'active'
+
 init_companies()
+ensure_agents_registered()
 restore_running_tasks()
 print(f"🚀 AI Company Hub: http://localhost:{PORT}")
 
