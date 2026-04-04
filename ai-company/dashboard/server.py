@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+"""AI Company Hub - Multi-company Dashboard Server"""
+import json, os, re, http.server, socketserver, subprocess, threading
+from pathlib import Path
+from datetime import datetime
+
+PORT = 3000
+BASE = Path("/home/sra/.openclaw/workspace/ai-company")
+DATA = BASE / "data"
+COMPANIES_FILE = DATA / "companies.json"
+
+def load_json(path, default=None):
+    if path.exists():
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return default if default is not None else []
+
+def save_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+# Default agent templates per role
+AGENT_TEMPLATES = {
+    "ceo": {"name": "CEO", "role": {"ko":"총괄","en":"Executive","ja":"総責任者","zh":"总负责人"}, "emoji": "👔"},
+    "cmo": {"name": "CMO", "role": {"ko":"마케팅","en":"Marketing","ja":"マーケティング","zh":"市场"}, "emoji": "📈"},
+    "cto": {"name": "CTO", "role": {"ko":"기술/개발","en":"Tech/Dev","ja":"技術/開発","zh":"技术/开发"}, "emoji": "💻"},
+    "coo": {"name": "COO", "role": {"ko":"운영","en":"Operations","ja":"運営","zh":"运营"}, "emoji": "⚙️"},
+    "cfo": {"name": "CFO", "role": {"ko":"재무","en":"Finance","ja":"財務","zh":"财务"}, "emoji": "💰"},
+    "designer": {"name": "Designer", "role": {"ko":"디자인","en":"Design","ja":"デザイン","zh":"设计"}, "emoji": "🎨"},
+    "hr": {"name": "HR", "role": {"ko":"인사","en":"HR","ja":"人事","zh":"人事"}, "emoji": "🤝"},
+    "sales": {"name": "Sales", "role": {"ko":"영업","en":"Sales","ja":"営業","zh":"销售"}, "emoji": "📊"},
+    "legal": {"name": "Legal", "role": {"ko":"법무","en":"Legal","ja":"法務","zh":"法务"}, "emoji": "⚖️"},
+    "support": {"name": "Support", "role": {"ko":"고객지원","en":"Support","ja":"サポート","zh":"客服"}, "emoji": "🎧"},
+}
+
+# Topic → recommended org structure
+TOPIC_ORGS = {
+    "default": ["ceo", "cmo", "cto"],
+    "marketing": ["ceo", "cmo", "designer", "cto", "coo"],
+    "development": ["ceo", "cto", "designer", "coo"],
+    "ecommerce": ["ceo", "cmo", "cto", "sales", "coo", "support"],
+    "finance": ["ceo", "cfo", "legal", "coo"],
+    "recruitment": ["ceo", "hr", "cmo", "coo"],
+    "restaurant": ["ceo", "cmo", "coo", "designer"],
+    "education": ["ceo", "cmo", "cto", "support"],
+    "healthcare": ["ceo", "cfo", "legal", "cmo", "coo"],
+    "realestate": ["ceo", "sales", "cmo", "legal", "cto"],
+}
+
+LANG = {"ko":"한국어","en":"English","ja":"日本語","zh":"中文"}
+
+def get_org_for_topic(topic):
+    topic_lower = topic.lower()
+    for key, org in TOPIC_ORGS.items():
+        if key != "default" and key in topic_lower:
+            return org
+    return TOPIC_ORGS["default"]
+
+def init_companies():
+    if not COMPANIES_FILE.exists():
+        save_json(COMPANIES_FILE, [])
+    return load_json(COMPANIES_FILE)
+
+def create_company(name, topic, lang="ko"):
+    companies = load_json(COMPANIES_FILE)
+    slug = re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')
+    if not slug: slug = 'company'
+    company_id = slug + "-" + datetime.now().strftime('%m%d%H%M')
+    org = get_org_for_topic(topic)
+    agents = []
+    for aid in org:
+        t = AGENT_TEMPLATES[aid]
+        agent_id = f"{company_id}-{aid}"
+        agent_name = t["name"]
+        agent_emoji = t["emoji"]
+        agent_role = t["role"].get(lang, t["role"]["en"])
+
+        # Create real OpenClaw agent
+        agent_workspace = DATA / company_id / "workspaces" / aid
+        agent_workspace.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ['openclaw', 'agents', 'add', agent_id,
+             '--workspace', str(agent_workspace), '--non-interactive'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
+        )
+
+        agents.append({
+            "id": aid, "agent_id": agent_id, "name": agent_name, "emoji": agent_emoji,
+            "role": agent_role, "status": "active" if aid == "ceo" else "idle",
+            "tasks": [], "messages": []
+        })
+    company = {
+        "id": company_id, "name": name, "topic": topic, "lang": lang,
+        "status": "starting", "created_at": datetime.now().isoformat(),
+        "agents": agents,
+        "chat": [
+            {"type": "agent", "from": "CEO", "emoji": "👔", "to": "마스터", "text": f"안녕하세요 마스터! 👋\n\n저는 '{name}'의 CEO입니다.\n\n주제: {topic}\n팀원: {', '.join(a['name'] for a in agents[1:])}\n\n@멘션으로 팀원들에게 지시하실 수 있습니다. 무엇부터 시작할까요?"}
+        ],
+        "activity_log": [
+            {"time": datetime.now().strftime('%H:%M'), "agent": "CEO", "text": f"🏢 '{name}' 프로젝트 시작. 주제: {topic}"}
+        ]
+    }
+    companies.append(company)
+    save_json(COMPANIES_FILE, companies)
+
+    # Save company state file
+    state_file = DATA / f"{company_id}.json"
+    save_json(state_file, company)
+    return company
+
+def get_company(cid):
+    state_file = DATA / f"{cid}.json"
+    if state_file.exists():
+        return load_json(state_file)
+    return None
+
+def update_company(cid, updates):
+    state_file = DATA / f"{cid}.json"
+    company = get_company(cid)
+    if company:
+        company.update(updates)
+        save_json(state_file, company)
+        # Also update in companies list
+        companies = load_json(COMPANIES_FILE)
+        for i, c in enumerate(companies):
+            if c["id"] == cid:
+                companies[i] = company
+                break
+        save_json(COMPANIES_FILE, companies)
+    return company
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, directory=str(BASE / "dashboard"), **kw)
+
+    def log_message(self, fmt, *args): pass
+
+    def _json(self, data, code=200):
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self._cors()
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+
+    def _cors(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+
+    def do_OPTIONS(self):
+        self.send_response(200); self._cors(); self.end_headers()
+
+    def do_GET(self):
+        if self.path == '/api/companies':
+            self._json(load_json(COMPANIES_FILE))
+        elif self.path.startswith('/api/company/'):
+            cid = self.path.split('/')[-1]
+            company = get_company(cid)
+            if company: self._json(company)
+            else: self._json({"error": "not found"}, 404)
+        elif self.path == '/api/agents':
+            self._json(AGENT_TEMPLATES)
+        elif self.path == '/api/topics':
+            self._json(TOPIC_ORGS)
+        elif self.path == '/api/langs':
+            self._json(LANG)
+        else:
+            if self.path == '/': self.path = '/index.html'
+            return super().do_GET()
+
+    def do_POST(self):
+        length = int(self.headers.get('Content-Length', 0))
+        body = json.loads(self.rfile.read(length)) if length else {}
+
+        if self.path == '/api/companies':
+            company = create_company(body.get('name',''), body.get('topic',''), body.get('lang','ko'))
+            self._json({"ok": True, "company": company})
+
+        elif self.path.startswith('/api/chat/'):
+            cid = self.path.split('/')[-1]
+            text = body.get('text', '').strip()
+            if not text: self._json({"error": "empty"}, 400); return
+
+            company = get_company(cid)
+            if not company: self._json({"error": "not found"}, 404); return
+
+            now = datetime.now()
+            time_str = now.strftime('%H:%M')
+            msg = {"from": "마스터", "text": text, "time": time_str, "type": "user"}
+
+            # Detect @mention
+            mention = re.search(r'@(\w+)', text)
+            target = mention.group(1).upper() if mention else 'CEO'
+
+            company["chat"].append(msg)
+            company["activity_log"].append({"time": time_str, "agent": "마스터", "text": f"@{target} {text}"})
+
+            # Queue for OpenClaw
+            queue_file = DATA / f"{cid}-queue.json"
+            queue = load_json(queue_file, [])
+            queue.append({"text": text, "time": now.isoformat(), "target": target, "processed": False, "id": now.timestamp()})
+            # Save queue
+            save_json(queue_file, queue)
+
+            # Immediately trigger processing via dedicated agent
+            threading.Thread(target=trigger_processor, args=(cid, text, target), daemon=True).start()
+
+            update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
+            self._json({"ok": True, "msg": msg, "target": target})
+
+        elif self.path.startswith('/api/agent-msg/'):
+            # Agent-to-agent message (from queue processor results)
+            cid = self.path.split('/')[-1]
+            from_agent = body.get('from', 'CEO')
+            to_agent = body.get('to', 'CEO')
+            text = body.get('text', '').strip()
+            emoji = body.get('emoji', '👔')
+            if not text: self._json({"error": "empty"}, 400); return
+
+            company = get_company(cid)
+            if not company: self._json({"error": "not found"}, 404); return
+
+            now = datetime.now()
+            time_str = now.strftime('%H:%M')
+            msg = {"from": from_agent, "emoji": emoji, "text": f"@{to_agent} {text}", "time": time_str, "type": "agent"}
+            company["chat"].append(msg)
+            company["activity_log"].append({"time": time_str, "agent": from_agent, "text": f"@{to_agent} {text}"})
+            update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
+            self._json({"ok": True, "msg": msg})
+
+        elif self.path == '/api/company/delete':
+            cid = body.get('id')
+            # Delete real OpenClaw agents
+            company = get_company(cid)
+            if company:
+                for agent in company.get('agents', []):
+                    agent_id = agent.get('agent_id', '')
+                    if agent_id:
+                        subprocess.Popen(
+                            ['openclaw', 'agents', 'delete', agent_id, '--non-interactive'],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                        )
+                # Delete workspace data
+                import shutil
+                company_dir = DATA / cid
+                if company_dir.exists():
+                    shutil.rmtree(company_dir, ignore_errors=True)
+
+            companies = load_json(COMPANIES_FILE)
+            companies = [c for c in companies if c["id"] != cid]
+            save_json(COMPANIES_FILE, companies)
+            state_file = DATA / f"{cid}.json"
+            if state_file.exists(): state_file.unlink()
+            queue_file = DATA / f"{cid}-queue.json"
+            if queue_file.exists(): queue_file.unlink()
+            self._json({"ok": True})
+
+        elif self.path.startswith('/api/agent-add/'):
+            cid = self.path.split('/')[-1]
+            company = get_company(cid)
+            if not company: self._json({"error": "not found"}, 404); return
+
+            name = body.get('name', '').strip()
+            role = body.get('role', '').strip()
+            emoji = body.get('emoji', '🤖')
+            prompt = body.get('prompt', '').strip()
+            if not name or not role: self._json({"error": "name and role required"}, 400); return
+
+            aid = re.sub(r'[^a-z0-9]', '-', name.lower())
+            agent_id = f"{cid}-{aid}"
+
+            # Create real OpenClaw agent
+            agent_workspace = DATA / cid / "workspaces" / aid
+            agent_workspace.mkdir(parents=True, exist_ok=True)
+            try:
+                subprocess.run(
+                    ['openclaw', 'agents', 'add', agent_id,
+                     '--workspace', str(agent_workspace), '--non-interactive'],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+                pass  # agent creation is optional
+
+            agent = {
+                "id": aid, "agent_id": agent_id, "name": name, "emoji": emoji,
+                "role": role, "status": "active",
+                "tasks": [], "messages": [],
+                "prompt": prompt
+            }
+            # Prevent duplicate
+            if not any(a['id'] == aid for a in company['agents']):
+                company['agents'].append(agent)
+                now = datetime.now().strftime('%H:%M')
+                company['activity_log'].append({"time": now, "agent": "CEO", "text": f"🆕 {emoji} {name} ({role}) 합류"})
+                update_company(cid, {"agents": company['agents'], "activity_log": company['activity_log']})
+
+            self._json({"ok": True, "agent": agent})
+
+        else:
+            self._json({"error": "not found"}, 404)
+
+class ReusableTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+PROCESSORS = {}
+
+def trigger_processor(cid, text, target):
+    if cid in PROCESSORS:
+        return
+    company = get_company(cid)
+    if not company:
+        return
+    # Find the agent_id for the target role
+    agent = next((a for a in company.get('agents', []) if a['id'] == target.lower()), None)
+    if not agent:
+        agent = company['agents'][0]  # fallback to CEO
+
+    agent_id = agent.get('agent_id', f"{cid}-{agent['id']}")
+    emoji = agent.get('emoji', '👔')
+    company_name = company.get('name', '')
+    topic = company.get('topic', '')
+
+    prompt = f"""당신은 '{company_name}'의 {agent['name']}({agent['role']})입니다. 주제: {topic}
+
+메시지: "{text}"
+
+처리 후 대시보드에 응답 POST:
+curl -s -X POST http://localhost:3000/api/agent-msg/{cid} -H 'Content-Type: application/json' -d '{{"from":"{agent['name']}","emoji":"{emoji}","to":"마스터","text":"응답내용"}}'
+
+큐 마킹: python3 -c "import json; f='/home/sra/.openclaw/workspace/ai-company/data/{cid}-queue.json'; q=json.load(open(f)); [m.__setitem__('processed',True) for m in q if not m.get('processed')]; json.dump(q,open(f,'w'),ensure_ascii=False)"
+
+한국어로 응답."""
+
+    PROCESSORS[cid] = True
+    try:
+        subprocess.Popen(
+            ['openclaw', 'agent', '--agent', agent_id, '--local', '-m', prompt],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except Exception as e:
+        print(f"Processor error: {e}")
+    finally:
+        PROCESSORS.pop(cid, None)
+
+init_companies()
+print(f"🚀 AI Company Hub: http://localhost:{PORT}")
+
+with ReusableTCPServer(("", PORT), Handler) as httpd:
+    httpd.serve_forever()
