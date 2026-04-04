@@ -10,15 +10,42 @@ DATA = BASE / "data"
 COMPANIES_FILE = DATA / "companies.json"
 
 def load_json(path, default=None):
-    if path.exists():
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+    if path.exists() and path.stat().st_size > 0:
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            print(f"[WARN] corrupted JSON: {path}, trying backup...")
+            try:
+                with open(str(path) + '.bak', 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # Restore from backup
+                import shutil
+                shutil.copy2(str(path) + '.bak', path)
+                return data
+            except:
+                print(f"[WARN] backup also failed, resetting {path}")
+                if default is not None:
+                    save_json(path, default)
+                return default
     return default if default is not None else []
 
 def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Validate before saving
+    try:
+        test = json.dumps(data, ensure_ascii=False)
+    except (TypeError, ValueError) as e:
+        print(f"[WARN] save_json validation failed for {path}: {e}")
+        return
+    # Backup existing file
+    if path.exists() and path.stat().st_size > 0:
+        try:
+            import shutil
+            shutil.copy2(path, str(path) + '.bak')
+        except: pass
     with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write(test)
 
 # Default agent templates per role
 AGENT_TEMPLATES = {
