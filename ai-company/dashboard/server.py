@@ -649,8 +649,29 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             save_json(queue_file, queue)
 
             # Trigger ALL mentioned agents in parallel
+            # Extract per-agent instruction from text
             for target in targets:
-                threading.Thread(target=trigger_processor, args=(cid, text, target.upper()), daemon=True).start()
+                # Find the instruction meant for this agent
+                agent_name = next((a['name'] for a in company['agents'] if a['id'] == target), target)
+                agent_ids = [a['id'] for a in company['agents']]
+                instruction = text  # default: full text
+                # Try to extract per-agent line (e.g. '@CTO "do something"')
+                pattern = rf'@{re.escape(target)}\s*"([^"]*)"'
+                m = re.search(pattern, text, re.IGNORECASE)
+                if m:
+                    instruction = m.group(1)
+                else:
+                    pattern2 = rf'@{re.escape(target)}\s*[:\-]?\s*(.+)'
+                    m2 = re.search(pattern2, text, re.IGNORECASE)
+                    if m2:
+                        line = m2.group(1).strip()
+                        # Check if it ends at the next @mention or end of text
+                        next_at = re.search(r'@(\w+)', line)
+                        if next_at and next_at.group(1).lower() in agent_ids:
+                            instruction = line[:next_at.start()].strip()
+                        else:
+                            instruction = line
+                threading.Thread(target=trigger_processor, args=(cid, instruction, target.upper()), daemon=True).start()
 
             # NOTE: Auto-detect disabled — tasks are created by agents via /api/task-add only
             # task_info = detect_task_intent(text, company)
