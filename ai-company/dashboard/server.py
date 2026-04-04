@@ -776,21 +776,34 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             agent_id = agent.get('agent_id', f"{cid}-{aid}")
             agent_workspace = DATA / cid / "workspaces" / aid
             try:
-                # Delete and re-register the agent
+                # Only clear sessions, keep workspace files intact
+                sessions_dir = Path.home() / '.openclaw' / 'agents' / agent_id / 'sessions'
+                if sessions_dir.exists():
+                    import shutil
+                    shutil.rmtree(sessions_dir, ignore_errors=True)
+                    sessions_dir.mkdir(parents=True, exist_ok=True)
+                # Re-register agent (workspace preserved)
                 subprocess.run(['openclaw', 'agents', 'delete', agent_id, '--force'],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
-                import shutil, time
-                if agent_workspace.exists():
-                    shutil.rmtree(agent_workspace, ignore_errors=True)
-                time.sleep(1)
-                register_agent(agent_id, agent_workspace, agent['name'], agent['role'],
-                               company.get('name', ''), agent.get('emoji', '🤖'))
-                a['status'] = 'active'
+                import time; time.sleep(1)
+                # Re-register without overwriting workspace
+                subprocess.run(
+                    ['openclaw', 'agents', 'add', agent_id, '--workspace', str(agent_workspace), '--non-interactive'],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15
+                )
+                # Warm up with a quick message
+                subprocess.run(
+                    ['openclaw', 'agent', '--agent', agent_id, '--local',
+                     '-m', f'당신은 {agent["name"]}({agent["role"]})입니다. 확인만 하세요.'],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30
+                )
+                for a2 in company['agents']:
+                    if a2['id'] == aid: a2['status'] = 'active'; break
                 update_company(cid, {"agents": company["agents"]})
                 now = datetime.now().strftime('%H:%M')
                 company = get_company(cid)
                 company['activity_log'].append({"time": now, "agent": "시스템",
-                    "text": f"🔄 {agent.get('emoji','')} {agent['name']} 재활성화 완료"})
+                    "text": f"🔄 {agent.get('emoji','')} {agent['name']} 재활성화 완료 (대화 내용 유지)"})
                 update_company(cid, {"activity_log": company["activity_log"]})
                 self._json({"ok": True})
             except Exception as e:
