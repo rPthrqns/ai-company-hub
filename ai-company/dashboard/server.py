@@ -457,11 +457,10 @@ def trigger_processor(cid, text, target):
 - 모든 팀원 세션은 온라인 상태입니다. "오프라인", "미활성", "대기중"이라고 말하지 마세요
 - 다른 팀원에게 지시가 필요하면 반드시 @멘션을 사용하세요. 사용 가능: {available_agents}
 - 한국어로 간결하게 응답하세요
+- curl이나 외부 명령을 실행하지 마세요. 응답 내용만 출력하세요
 
 메시지: "{text}"
-
-응답 후 아래 curl로 대시보드에 POST하세요:
-curl -s -X POST http://localhost:3000/api/agent-msg/{cid} -H 'Content-Type: application/json' -d '{{"from":"{agent['name']}","emoji":"{emoji}","to":"마스터","text":"여기에_응답내용"}}'"""
+답변:"""
 
     PROCESSORS[cid] = True
     try:
@@ -472,6 +471,29 @@ curl -s -X POST http://localhost:3000/api/agent-msg/{cid} -H 'Content-Type: appl
         stdout, stderr = proc.communicate(timeout=60)
         if proc.returncode != 0:
             print(f"[WARN] processor {agent_id} failed: {stderr.decode()[:200]}")
+        else:
+            # Extract response and POST to dashboard automatically
+            reply = stdout.decode().strip()
+            if reply:
+                # Remove any leading meta lines
+                lines = reply.split('\n')
+                clean_lines = [l for l in lines if not l.startswith('[') and l.strip()]
+                reply = '\n'.join(clean_lines).strip()
+            if reply:
+                import urllib.request
+                try:
+                    payload = json.dumps({
+                        "from": agent['name'], "emoji": emoji,
+                        "to": "마스터", "text": reply
+                    }).encode()
+                    req = urllib.request.Request(
+                        f'http://localhost:3000/api/agent-msg/{cid}',
+                        data=payload,
+                        headers={'Content-Type': 'application/json'}
+                    )
+                    urllib.request.urlopen(req, timeout=5)
+                except Exception as e:
+                    print(f"[WARN] post response failed: {e}")
     except Exception as e:
         print(f"Processor error: {e}")
     finally:
