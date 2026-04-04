@@ -342,6 +342,16 @@ async function refreshCompany(){
 }
 
 function renderCompany(c){
+  renderCompanyUI(c);
+  // Render chat messages
+  const chatEl=document.getElementById('chat-messages');
+  chatEl.innerHTML='';
+  if(activeAgentFilter)renderPanels();
+  else if(c.chat)c.chat.forEach(m=>appendChat(m));
+  lastChatLen=(c.chat||[]).length;
+}
+
+function renderCompanyUI(c){
   document.getElementById('chat-title').textContent=t('chatTitle');
   document.getElementById('mentions').innerHTML=c.agents.map(a=>
     `<div class="mention-btn" onclick="insertMention('${a.name}')">${a.emoji} @${a.name}</div>`
@@ -377,13 +387,6 @@ function renderCompany(c){
     taskHtml=`<div style="color:var(--dim);text-align:center;padding:14px;font-size:10px">정기 작업 없음<br><span style="font-size:9px">채팅에서 "모니터링", "정기적" 등으로 자동 생성</span></div>`;
   }
   document.getElementById('task-list').innerHTML=taskHtml;
-  if(activeAgentFilter){
-    renderPanels();
-  } else if(c.chat&&c.chat.length>lastChatLen){
-    const newMsgs=c.chat.slice(lastChatLen);
-    newMsgs.forEach(m=>appendChat(m));lastChatLen=c.chat.length;
-    if(newMsgs.some(m=>m.type==='agent')) document.getElementById('typing').classList.remove('show');
-  }else if(c.chat) lastChatLen=c.chat.length;
 }
 
 function appendChat(m){
@@ -602,18 +605,27 @@ let sseReconnectTimer=null;
 function connectSSE(){
   const es=new EventSource('/api/sse');
   es.addEventListener('init',e=>{
+    // Just sync data, don't re-render (load() already handles it)
     const data=JSON.parse(e.data);
     if(data)companies=data;
-    if(currentCompany)refreshCompany();
   });
   es.addEventListener('company_update',e=>{
     const data=JSON.parse(e.data);
     if(data.company&&data.id===currentCompany){
-      renderCompany(data.company);
+      const c=data.company;
+      // Update local data
+      const idx=companies.findIndex(c2=>c2.id===data.id);
+      if(idx>=0)companies[idx]=c;
+      // Re-render only if not already handled by user action
+      const chatLen=(c.chat||[]).length;
+      if(chatLen>lastChatLen){
+        const newMsgs=c.chat.slice(lastChatLen);
+        newMsgs.forEach(m=>appendChat(m));lastChatLen=chatLen;
+        if(newMsgs.some(m=>m.type==='agent')) document.getElementById('typing').classList.remove('show');
+      }
+      if(activeAgentFilter)renderPanels();
+      else renderCompanyUI(c);
     }
-    // Also update companies list for sidebar
-    const idx=companies.findIndex(c=>c.id===data.id);
-    if(idx>=0)companies[idx]=data.company;
   });
   es.onerror=()=>{
     es.close();
