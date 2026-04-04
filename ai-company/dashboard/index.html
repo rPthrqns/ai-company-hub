@@ -378,7 +378,7 @@ async function addAgent(){
   if(!name||!role){alert('이름과 역할을 입력하세요');return}
   const btn=document.getElementById('btn-agent');btn.classList.add('loading');
   const t=toastLoading(`"${name}" 에이전트 생성 중...`);
-  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),15000);
+  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),30000);
   try{
   const res=await fetch(`/api/agent-add/${currentCompany}`,{
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,role,emoji,prompt}),signal:controller.signal

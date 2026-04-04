@@ -81,11 +81,13 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji):
     if bootstrap.exists():
         bootstrap.unlink()
 
-def register_agent(agent_id, agent_workspace, name, role, company_name, emoji):
+def register_agent(agent_id, agent_workspace, name, role, company_name, emoji, wait=False):
     """Register and activate an OpenClaw agent."""
     setup_agent_workspace(agent_workspace, name, role, company_name, emoji)
-    # Register and activate in background thread
-    threading.Thread(target=_register_and_activate, args=(agent_id, str(agent_workspace), name, role), daemon=True).start()
+    if wait:
+        _register_and_activate(agent_id, str(agent_workspace), name, role)
+    else:
+        threading.Thread(target=_register_and_activate, args=(agent_id, str(agent_workspace), name, role), daemon=True).start()
 
 AGENT_LOCK = threading.Lock()
 
@@ -164,9 +166,9 @@ def create_company(name, topic, lang="ko"):
         agent_emoji = t["emoji"]
         agent_role = t["role"].get(lang, t["role"]["en"])
 
-        # Create real OpenClaw agent
+        # Create real OpenClaw agent (wait for all to register before responding)
         agent_workspace = DATA / company_id / "workspaces" / aid
-        register_agent(agent_id, agent_workspace, agent_name, agent_role, name, agent_emoji)
+        register_agent(agent_id, agent_workspace, agent_name, agent_role, name, agent_emoji, wait=True)
 
         agents.append({
             "id": aid, "agent_id": agent_id, "name": agent_name, "emoji": agent_emoji,
@@ -388,7 +390,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
             # Create real OpenClaw agent
             agent_workspace = DATA / cid / "workspaces" / aid
-            register_agent(agent_id, agent_workspace, name, role, company.get('name',''), emoji)
+            register_agent(agent_id, agent_workspace, name, role, company.get('name',''), emoji, wait=True)
 
             agent = {
                 "id": aid, "agent_id": agent_id, "name": name, "emoji": emoji,
