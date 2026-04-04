@@ -234,23 +234,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   </div>
 </div>
 
-<!-- Agent Detail Modal -->
-<div class="modal-overlay" id="agent-detail-modal">
-  <div class="modal" style="max-width:480px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2 id="agent-detail-title" style="margin:0;font-size:14px">📋 작업 현황</h2>
-      <span style="cursor:pointer;font-size:18px;color:var(--dim)" onclick="closeAgentDetail()">✕</span>
-    </div>
-    <div style="margin-bottom:12px">
-      <div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:6px">📌 할당된 정기 작업</div>
-      <div id="agent-detail-tasks"></div>
-    </div>
-    <div>
-      <div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:6px">💬 최근 메시지 <span id="agent-detail-count" style="color:var(--dim)"></span></div>
-      <div id="agent-detail-msgs" style="max-height:200px;overflow-y:auto"></div>
-    </div>
-  </div>
-</div>
+<!-- removed agent-detail-modal, now uses main panel filter -->
 
 <!-- Task Add Modal -->
 <div class="modal-overlay" id="task-modal">
@@ -391,7 +375,9 @@ function renderCompany(c){
     taskHtml=`<div style="color:var(--dim);text-align:center;padding:14px;font-size:10px">정기 작업 없음<br><span style="font-size:9px">채팅에서 "모니터링", "정기적" 등으로 자동 생성</span></div>`;
   }
   document.getElementById('task-list').innerHTML=taskHtml;
-  if(!activeAgentFilter&&c.chat&&c.chat.length>lastChatLen){
+  if(activeAgentFilter){
+    renderPanels();
+  } else if(c.chat&&c.chat.length>lastChatLen){
     const newMsgs=c.chat.slice(lastChatLen);
     newMsgs.forEach(m=>appendChat(m));lastChatLen=c.chat.length;
     if(newMsgs.some(m=>m.type==='agent')) document.getElementById('typing').classList.remove('show');
@@ -414,42 +400,54 @@ function insertMention(name){const i=document.getElementById('chat-input');i.val
 let activeAgentFilter=null;
 
 function filterAgentChat(agentId,agentName,agentEmoji){
+  if(activeAgentFilter===agentId){
+    activeAgentFilter=null;
+  } else {
+    activeAgentFilter={id:agentId,name:agentName,emoji:agentEmoji};
+  }
+  renderPanels();
+}
+
+function renderPanels(){
   const company=companies.find(c=>c.id===currentCompany);
   if(!company)return;
-  const agentTasks=(company.recurring_tasks||[]).filter(t=>t.agent_id===agentId);
-  const agentMsgs=(company.chat||[]).filter(m=>m.from&&m.from.toLowerCase()===agentName.toLowerCase());
-  const modal=document.getElementById('agent-detail-modal');
-  document.getElementById('agent-detail-title').textContent=`${agentEmoji} ${agentName} 작업 현황`;
-  // Tasks section
-  let tasksHtml='';
-  if(agentTasks.length){
-    tasksHtml=agentTasks.map(t=>{
-      const intLbl=t.interval_minutes>=1440?`${Math.round(t.interval_minutes/1440)}일`:t.interval_minutes>=60?`${t.interval_minutes/60}시간`:`${t.interval_minutes}분`;
+  const chatEl=document.getElementById('chat-messages');
+  const taskEl=document.getElementById('task-list');
+  // Chat filter
+  chatEl.innerHTML='';
+  if(activeAgentFilter){
+    const filtered=(company.chat||[]).filter(m=>m.from&&m.from.toLowerCase()===activeAgentFilter.name.toLowerCase());
+    chatEl.innerHTML+=`<div style="text-align:center;padding:6px;font-size:10px;color:var(--accent);cursor:pointer;background:var(--card);border-radius:6px;margin-bottom:4px" onclick="activeAgentFilter=null;renderPanels()">🔍 ${activeAgentFilter.emoji} ${activeAgentFilter.name} 필터링 중 — 클릭하면 전체 보기</div>`;
+    if(filtered.length===0) chatEl.innerHTML+=`<div style="text-align:center;padding:20px;color:var(--dim);font-size:11px">메시지 없음</div>`;
+    else filtered.forEach(m=>appendChat(m));
+  } else {
+    if(company.chat)company.chat.forEach(m=>appendChat(m));
+  }
+  lastChatLen=(company.chat||[]).length;
+  // Task filter
+  const allTasks=company.recurring_tasks||[];
+  let taskHtml='';
+  const filteredTasks=activeAgentFilter?allTasks.filter(t=>t.agent_id===activeAgentFilter.id):allTasks;
+  if(filteredTasks.length){
+    taskHtml=filteredTasks.map(t=>{
       const s=t.status==='running'?'🔄 실행 중':t.status==='paused'?'⏸️ 대기':'⏹️ 중지';
       const lastR=t.last_run?new Date(t.last_run).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):'—';
       const nextR=t.next_run?new Date(t.next_run).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):'—';
       const lastResult=t.results&&t.results.length?t.results[t.results.length-1].text:'';
-      return `<div class="rtask-card ${t.status}" style="margin-bottom:6px"><div class="rtask-top"><span class="rtask-title">${t.title}</span><span class="rtask-status">${s}</span></div><div class="rtask-meta">${intLbl}마다 · 마지막: ${lastR} · 다음: ${nextR}</div>${lastResult?`<div class="rtask-result">💬 ${lastResult}</div>`:''}<div class="rtask-actions"><button class="rtask-btn" onclick="taskAction('pause','${t.id}')">⏸</button><button class="rtask-btn" onclick="taskAction('stop','${t.id}')">⏹</button><button class="rtask-btn" style="color:#ef4444;border-color:#7f1d1d" onclick="deleteTask('${t.id}','${t.title.replace(/'/g,"\\'")}');closeAgentDetail()">🗑</button></div></div>`;
+      const intLbl=t.interval_minutes>=1440?`${Math.round(t.interval_minutes/1440)}일`:t.interval_minutes>=60?`${t.interval_minutes/60}시간`:`${t.interval_minutes}분`;
+      let btns='';
+      if(t.status==='running') btns=`<button class="rtask-btn" onclick="taskAction('pause','${t.id}')">⏸ 대기</button><button class="rtask-btn" onclick="taskAction('stop','${t.id}')">⏹ 중지</button>`;
+      else if(t.status==='paused') btns=`<button class="rtask-btn" onclick="taskAction('resume','${t.id}')">▶ 재개</button><button class="rtask-btn" onclick="taskAction('stop','${t.id}')">⏹ 중지</button>`;
+      btns+=`<button class="rtask-btn" style="margin-left:auto;color:#ef4444;border-color:#7f1d1d" onclick="deleteTask('${t.id}','${t.title.replace(/'/g,"\\'")}')">🗑 삭제</button>`;
+      return `<div class="rtask-card ${t.status}"><div class="rtask-top"><span>${t.agent_emoji}</span><span class="rtask-title" title="${t.title}">${t.title}</span><span class="rtask-status">${s}</span></div><div class="rtask-meta">${intLbl}마다 · 마지막: ${lastR} · 다음: ${nextR}</div>${lastResult?`<div class="rtask-result" title="${lastResult.replace(/"/g,'&quot;')}">💬 ${lastResult}</div>`:''}<div class="rtask-actions">${btns}</div></div>`;
     }).join('');
   } else {
-    tasksHtml=`<div style="color:var(--dim);text-align:center;padding:10px;font-size:10px">할당된 정기 작업 없음</div>`;
+    taskHtml=`<div style="color:var(--dim);text-align:center;padding:14px;font-size:10px">${activeAgentFilter?'할당된 정기 작업 없음':'정기 작업 없음<br><span style="font-size:9px">채팅에서 "모니터링", "정기적" 등으로 자동 생성</span>'}</div>`;
   }
-  document.getElementById('agent-detail-tasks').innerHTML=tasksHtml;
-  // Messages section
-  let msgsHtml='';
-  if(agentMsgs.length){
-    msgsHtml=agentMsgs.slice(-10).reverse().map(m=>{
-      return `<div style="padding:6px 0;border-bottom:1px solid #1e293b;font-size:11px"><div style="color:var(--dim);font-size:9px">${m.time||''}</div><div style="color:#e2e8f0;margin-top:2px">${(m.text||'').replace(/@(\w+)/g,'<span class="mention">@$1</span>')}</div></div>`;
-    }).join('');
-  } else {
-    msgsHtml=`<div style="color:var(--dim);text-align:center;padding:10px;font-size:10px">메시지 없음</div>`;
-  }
-  document.getElementById('agent-detail-msgs').innerHTML=msgsHtml;
-  document.getElementById('agent-detail-count').textContent=`최근 ${Math.min(agentMsgs.length,10)}건`;
-  modal.classList.add('show');
+  taskEl.innerHTML=taskHtml;
 }
 
-function closeAgentDetail(){document.getElementById('agent-detail-modal').classList.remove('show')}
+function closeAgentDetail(){}
 
 async function sendChat(){
   const input=document.getElementById('chat-input'),text=input.value.trim();if(!text)return;input.value='';
