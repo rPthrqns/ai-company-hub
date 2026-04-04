@@ -207,9 +207,11 @@ def create_company(name, topic, lang="ko"):
                     update_company(cid, {"agents": c['agents']})
                     # Check if all agents are ready
                     if all_ready:
-                        ready_msg = _welcome_msg(c['name'], c['topic'], c['agents'], lang)['ready']
-                        c['chat'].append({"type": "system", "from": "시스템", "emoji": "✅", "to": "", "text": ready_msg})
-                        c['activity_log'].append({"time": datetime.now().strftime('%H:%M'), "agent": "시스템", "text": ready_msg})
+                        w = _welcome_msg(c['name'], c['topic'], c['agents'], lang)
+                        c['chat'].append({"type": "system", "from": "시스템", "emoji": "✅", "to": "", "text": w['ready']})
+                        c['chat'].append({"type": "agent", "from": "CEO", "emoji": "👔", "to": "마스터", "text": w['greeting']})
+                        c['activity_log'].append({"time": datetime.now().strftime('%H:%M'), "agent": "시스템", "text": w['ready']})
+                        c['activity_log'].append({"time": datetime.now().strftime('%H:%M'), "agent": "CEO", "text": w['log']})
                         update_company(cid, {"chat": c['chat'], "activity_log": c['activity_log']})
             return _done
 
@@ -227,12 +229,10 @@ def create_company(name, topic, lang="ko"):
         "status": "starting", "created_at": datetime.now().isoformat(),
         "agents": agents,
         "chat": [
-            {"type": "system", "from": "시스템", "emoji": "⚙️", "to": "", "text": W['waiting']},
-            {"type": "agent", "from": "CEO", "emoji": "👔", "to": "마스터", "text": W['greeting']}
+            {"type": "system", "from": "시스템", "emoji": "⚙️", "to": "", "text": W['waiting']}
         ],
         "activity_log": [
-            {"time": datetime.now().strftime('%H:%M'), "agent": "시스템", "text": W['waiting']},
-            {"time": datetime.now().strftime('%H:%M'), "agent": "CEO", "text": W['log']}
+            {"time": datetime.now().strftime('%H:%M'), "agent": "시스템", "text": W['waiting']}
         ]
     }
     companies.append(company)
