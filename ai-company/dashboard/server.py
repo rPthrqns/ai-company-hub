@@ -172,19 +172,19 @@ def create_company(name, topic, lang="ko"):
 
         # Create real OpenClaw agent (async, UI will poll status)
         agent_workspace = DATA / company_id / "workspaces" / aid
-        def make_done_callback(cid, aid_val, is_ceo):
+        def make_done_callback(cid, aid_val):
             def _done():
                 c = get_company(cid)
                 if c:
                     for a in c.get('agents', []):
                         if a['id'] == aid_val:
-                            a['status'] = 'active' if is_ceo else 'idle'
+                            a['status'] = 'active'
                             break
                     update_company(cid, {"agents": c['agents']})
             return _done
 
         register_agent(agent_id, agent_workspace, agent_name, agent_role, name, agent_emoji,
-                       wait=False, on_done=make_done_callback(company_id, aid, aid == 'ceo'))
+                       wait=False, on_done=make_done_callback(company_id, aid))
 
         agents.append({
             "id": aid, "agent_id": agent_id, "name": agent_name, "emoji": agent_emoji,
@@ -493,16 +493,18 @@ def trigger_processor(cid, text, target):
     if lock_key in PROCESSORS:
         return
     PROCESSORS[lock_key] = True
-    # Update agent status to active when triggered
-    try:
-        c = get_company(cid)
-        if c:
-            for a in c.get('agents', []):
-                if a['id'] == agent['id'] and a.get('status') != 'active':
-                    a['status'] = 'active'
-                    update_company(cid, {"agents": c['agents']})
-                    break
-    except: pass
+    # Set status to working
+    def _update_agent_status(status):
+        try:
+            c = get_company(cid)
+            if c:
+                for a in c.get('agents', []):
+                    if a['id'] == agent['id']:
+                        a['status'] = status
+                        break
+                update_company(cid, {"agents": c['agents']})
+        except: pass
+    _update_agent_status('working')
     try:
         proc = subprocess.Popen(
             ['openclaw', 'agent', '--agent', agent_id, '--local', '-m', prompt],
@@ -538,6 +540,7 @@ def trigger_processor(cid, text, target):
         print(f"Processor error: {e}")
     finally:
         PROCESSORS.pop(lock_key, None)
+        _update_agent_status('active')
 
 init_companies()
 print(f"🚀 AI Company Hub: http://localhost:{PORT}")
