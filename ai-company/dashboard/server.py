@@ -650,7 +650,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
             # Save user message FIRST (before triggering agents)
             update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
-            self._json({"ok": True, "msg": msg, "target": target})
+            self._json({"ok": True, "msg": msg, "target": targets[0] if targets else 'CEO'})
 
             # Trigger ALL mentioned agents in parallel (after save)
             # Extract per-agent instruction from text
