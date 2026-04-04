@@ -85,13 +85,13 @@ def register_agent(agent_id, agent_workspace, name, role, company_name, emoji):
     """Register and activate an OpenClaw agent."""
     setup_agent_workspace(agent_workspace, name, role, company_name, emoji)
     # Register and activate in background thread
-    threading.Thread(target=_register_and_activate, args=(agent_id, name, role), daemon=True).start()
+    threading.Thread(target=_register_and_activate, args=(agent_id, str(agent_workspace), name, role), daemon=True).start()
 
-def _register_and_activate(agent_id, name, role):
+def _register_and_activate(agent_id, workspace, name, role):
     """Background: register agent and activate session."""
     try:
         subprocess.run(
-            ['openclaw', 'agents', 'add', agent_id, '--non-interactive'],
+            ['openclaw', 'agents', 'add', agent_id, '--workspace', workspace, '--non-interactive'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
         )
     except: pass
@@ -192,7 +192,10 @@ def create_company(name, topic, lang="ko"):
 def get_company(cid):
     state_file = DATA / f"{cid}.json"
     if state_file.exists():
-        return load_json(state_file)
+        try:
+            data = load_json(state_file)
+            if data: return data
+        except: pass
     return None
 
 def update_company(cid, updates):
