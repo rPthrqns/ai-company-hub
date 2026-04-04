@@ -4,6 +4,25 @@ import json, os, re, http.server, socketserver, subprocess, threading, time, url
 from pathlib import Path
 from datetime import datetime
 
+# SSE clients
+SSE_CLIENTS = []
+SSE_LOCK = threading.Lock()
+
+def sse_broadcast(event_type, data):
+    """Broadcast SSE event to all connected clients."""
+    import sys
+    msg = f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+    with SSE_LOCK:
+        dead = []
+        for wfile in SSE_CLIENTS:
+            try:
+                wfile.write(msg.encode())
+                wfile.flush()
+            except:
+                dead.append(wfile)
+        for w in dead:
+            SSE_CLIENTS.remove(w)
+
 PORT = 3000
 BASE = Path("/home/sra/.openclaw/workspace/ai-company")
 DATA = BASE / "data"
@@ -498,6 +517,8 @@ def update_company(cid, updates):
                 companies[i] = company
                 break
         save_json(COMPANIES_FILE, companies)
+        # Broadcast SSE update
+        sse_broadcast('company_update', {"id": cid, "company": company})
     return company
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -526,7 +547,36 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_response(200); self._cors(); self.end_headers()
 
     def do_GET(self):
-        if self.path == '/api/companies':
+        if self.path == '/api/sse':
+            # Server-Sent Events endpoint
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            wfile = self.wfile
+            with SSE_LOCK:
+                SSE_CLIENTS.append(wfile)
+            # Send initial company data
+            try:
+                companies = load_json(COMPANIES_FILE, [])
+                initial = json.dumps(companies, ensure_ascii=False)
+                wfile.write(f"event: init\ndata: {initial}\n\n".encode())
+                wfile.flush()
+            except: pass
+            # Keep alive
+            try:
+                while True:
+                    time.sleep(30)
+                    wfile.write(b": keepalive\n\n")
+                    wfile.flush()
+            except:
+                with SSE_LOCK:
+                    if wfile in SSE_CLIENTS:
+                        SSE_CLIENTS.remove(wfile)
+            return
+        elif self.path == '/api/companies':
             self._json(load_json(COMPANIES_FILE))
         elif self.path.startswith('/api/company/'):
             cid = self.path.split('/')[-1]

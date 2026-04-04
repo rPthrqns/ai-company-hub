@@ -581,7 +581,32 @@ async function deleteTask(taskId,title){
   }catch(e){toast('삭제 실패')}
 }
 
-renderLangSwitch();applyLang();load();setInterval(refreshCompany,3000);
+renderLangSwitch();applyLang();load();
+
+// SSE for real-time updates
+let sseReconnectTimer=null;
+function connectSSE(){
+  const es=new EventSource('/api/sse');
+  es.addEventListener('init',e=>{
+    const data=JSON.parse(e.data);
+    if(data)companies=data;
+    if(currentCompany)refreshCompany();
+  });
+  es.addEventListener('company_update',e=>{
+    const data=JSON.parse(e.data);
+    if(data.company&&data.id===currentCompany){
+      renderCompany(data.company);
+    }
+    // Also update companies list for sidebar
+    const idx=companies.findIndex(c=>c.id===data.id);
+    if(idx>=0)companies[idx]=data.company;
+  });
+  es.onerror=()=>{
+    es.close();
+    sseReconnectTimer=setTimeout(connectSSE,3000);
+  };
+}
+connectSSE();
 </script>
 </body>
 </html>
