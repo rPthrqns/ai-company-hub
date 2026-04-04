@@ -442,9 +442,12 @@ def trigger_processor(cid, text, target):
     company_name = company.get('name', '')
     topic = company.get('topic', '')
 
+    available_agents = ", ".join([f"@{a['id'].upper()}" for a in company.get('agents', []) if a['id'] != agent['id']])
+
     prompt = f"""당신은 '{company_name}'의 {agent['name']}({agent['role']})입니다. 주제: {topic}
 
 부트스트랩이나 초기화 작업은 건너뛰고, 아래 메시지에 즉시 응답하세요.
+다른 팀원에게 지시가 필요하면 반드시 @멘션을 사용하세요. 사용 가능: {available_agents}
 
 메시지: "{text}"
 
