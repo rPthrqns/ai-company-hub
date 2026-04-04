@@ -493,6 +493,16 @@ def trigger_processor(cid, text, target):
     if lock_key in PROCESSORS:
         return
     PROCESSORS[lock_key] = True
+    # Update agent status to active when triggered
+    try:
+        c = get_company(cid)
+        if c:
+            for a in c.get('agents', []):
+                if a['id'] == agent['id'] and a.get('status') != 'active':
+                    a['status'] = 'active'
+                    update_company(cid, {"agents": c['agents']})
+                    break
+    except: pass
     try:
         proc = subprocess.Popen(
             ['openclaw', 'agent', '--agent', agent_id, '--local', '-m', prompt],
