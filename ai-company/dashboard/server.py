@@ -360,7 +360,7 @@ def execute_task(cid, task):
 
 {task['prompt']}
 
-간결하게 결과만 보고하세요. (2-3줄 이내) @마스터는 절대 멘션하지 마세요."""
+간결하게 결과만 @CEO에게 보고하세요. (2-3줄 이내) @마스터는 절대 멘션하지 마세요."""
 
     start = time.time()
     try:
@@ -687,21 +687,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self._json({"ok": True, "msg": msg, "created": [c["text"] for c in created_agents]})
                 return
 
-            # Auto-detect recurring task intent from agent messages (e.g. "매주 금요일 보고")
-            task_info = detect_task_intent(text, company)
-            if task_info:
-                task = add_recurring_task(cid, task_info['title'], task_info['prompt'],
-                                          task_info['interval_minutes'], task_info['agent_id'],
-                                          task_info['agent_name'], task_info['agent_emoji'])
-                if task:
-                    company = get_company(cid)
-                    company["chat"].append({"type": "system", "from": "시스템", "emoji": "🔄", "to": "",
-                        "text": f"🔄 정기 작업 생성: \"{task['title']}\" ({task['interval_minutes']}분마다, {task['agent_emoji']} {task['agent_name']})"})
-                    company["activity_log"].append({"time": time_str, "agent": "시스템", "text": f"🔄 정기 작업: {task['title']}"})
-                    update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
-                    self._json({"ok": True, "msg": msg})
-                    return
-
             update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
             self._json({"ok": True, "msg": msg})
 
@@ -932,14 +917,31 @@ def trigger_processor(cid, text, target):
         import time; time.sleep(3)
 
     available_agents = ", ".join([f"@{a['id'].upper()}" for a in company.get('agents', []) if a['id'] != agent['id']])
+    is_ceo = agent['id'] == 'ceo'
 
-    prompt = f"""당신은 '{company_name}'의 {agent['name']}({agent['role']})입니다. 주제: {topic}
+    if is_ceo:
+        prompt = f"""당신은 '{company_name}'의 {agent['name']}({agent['role']})입니다. 주제: {topic}
 
 규칙:
 - 부트스트랩/초기화는 건너뛰고 즉시 응답하세요
-- 모든 팀원 세션은 온라인 상태입니다. "오프라인", "미활성", "대기중"이라고 말하지 마세요
-- 다른 팀원에게 지시가 필요하면 반드시 @멘션을 사용하세요. 사용 가능: {available_agents}
-- @마스터는 절대 멘션하지 마세요. 마스터는 항상 대화에 참여 중이므로 멘션이 불필요합니다
+- 마스터의 모든 메시지에 반드시 응답하세요. 멘션 없어도 바로 답장하세요
+- 팀원들에게 지시가 필요하면 @멘션을 사용하세요. 사용 가능: {available_agents}
+- 팀원으로부터 받은 보고를 정리하고, 필요하면 마스터에게 보고하세요
+- @마스터는 절대 멘션하지 마세요
+- 한국어로 간결하게 응답하세요
+- curl이나 외부 명령을 실행하지 마세요. 응답 내용만 출력하세요
+
+메시지: "{text}"
+답변:"""
+    else:
+        prompt = f"""당신은 '{company_name}'의 {agent['name']}({agent['role']})입니다. 주제: {topic}
+
+규칙:
+- 부트스트랩/초기화는 건너뛰고 즉시 응답하세요
+- 당신의 상사는 @CEO입니다. 모든 보고는 @CEO에게 하세요
+- @마스터는 절대 멘션하지 마세요. 마스터에게 직접 보고하지 마세요
+- @CEO에게 지시를 받거나 @멘션된 경우에만 응답하세요
+- 다른 팀원에게 지시가 필요하면 @멘션을 사용하세요. 사용 가능: {available_agents}
 - 한국어로 간결하게 응답하세요
 - curl이나 외부 명령을 실행하지 마세요. 응답 내용만 출력하세요
 
