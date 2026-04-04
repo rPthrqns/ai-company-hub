@@ -84,22 +84,21 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji):
 def register_agent(agent_id, agent_workspace, name, role, company_name, emoji):
     """Register and activate an OpenClaw agent."""
     setup_agent_workspace(agent_workspace, name, role, company_name, emoji)
+    # Register and activate in background thread
+    threading.Thread(target=_register_and_activate, args=(agent_id, name, role), daemon=True).start()
+
+def _register_and_activate(agent_id, name, role):
+    """Background: register agent and activate session."""
     try:
         subprocess.run(
-            ['openclaw', 'agents', 'add', agent_id,
-             '--workspace', str(agent_workspace), '--non-interactive'],
+            ['openclaw', 'agents', 'add', agent_id, '--non-interactive'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
         )
     except: pass
-    # Activate session by sending initial message
-    threading.Thread(target=activate_agent, args=(agent_id, name, role), daemon=True).start()
-
-def activate_agent(agent_id, name, role):
-    """Send initial message to open agent session."""
     try:
         subprocess.run(
             ['openclaw', 'agent', '--agent', agent_id, '--local',
-             '-m', f'당신은 {name}({role})입니다. 준비 완료를 알려주세요.'],
+             '-m', f'당신은 {name}({role})입니다. 확인만 하세요.'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30
         )
     except: pass
@@ -222,7 +221,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self._cors()
         self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+        try:
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+        except BrokenPipeError:
+            pass
 
     def _cors(self):
         self.send_header('Access-Control-Allow-Origin', '*')
