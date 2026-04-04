@@ -28,7 +28,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .panel-title{font-size:12px;font-weight:600;color:var(--dim);margin-bottom:10px;display:flex;align-items:center;gap:5px}
 .agent-card{background:var(--card);border-radius:8px;padding:9px;margin-bottom:5px;transition:all .15s;border-left:3px solid #4b5563;cursor:pointer}
 .agent-card:hover{background:#253047;transform:translateX(2px)}
-.agent-card.active{border-left-color:var(--green)}.agent-card.working{border-left-color:var(--yellow)}.agent-card.idle{opacity:.5}
+.agent-card.active{border-left-color:var(--green)}.agent-card.working{border-left-color:var(--yellow)}.agent-card.idle{opacity:.5}.agent-card.registering{border-left-color:var(--accent);opacity:.6;animation:pulse-border 1.5s infinite}
 .agent-top{display:flex;align-items:center;gap:6px}
 .agent-emoji{font-size:16px}.agent-name{font-size:12px;font-weight:600;color:#f1f5f9}
 .agent-role{font-size:9px;color:var(--dim);margin-top:1px}
@@ -37,6 +37,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .agent-tag.active{background:#064e3b;color:#6ee7b7}
 .agent-tag.working{background:#78350f;color:#fcd34d}
 .agent-tag.idle{background:#1e293b;color:#64748b;border:1px solid #334155}
+.agent-tag.registering{background:#1e3a5f;color:#93c5fd;border:1px solid var(--accent)}
 .pbar{height:2px;background:#374151;border-radius:2px;margin-top:4px;overflow:hidden}
 .pfill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .5s}
 .chat-panel{display:flex;flex-direction:column}
@@ -110,6 +111,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .empty-state p{font-size:14px;margin-bottom:4px}
 .empty-state .hint{font-size:12px}
 @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse-border{0%,100%{border-left-color:var(--accent)}50%{border-left-color:var(--accent2)}}
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#374151;border-radius:2px}
 </style>
 </head>
@@ -303,9 +305,10 @@ function renderCompany(c){
   document.getElementById('org-list').innerHTML=c.agents.map(a=>{
     const tasks=a.tasks||[],done=tasks.filter(t=>t.status==='completed').length,total=tasks.length;
     const prog=total?Math.round(done/total*100):0,hasActive=tasks.some(t=>t.status==='in-progress');
-    const cls=a.status==='idle'?'idle':hasActive?'working':'active';
-    const lbl=cls==='working'?'🔄 작업중':cls==='active'?'🟢 활성':'⏳ 대기';
-    return `<div class="agent-card ${cls}"><div class="agent-top"><span class="agent-emoji">${a.emoji}</span><span class="agent-name">${a.name}</span><span class="agent-tag ${cls}" style="margin-left:auto">${lbl}</span><span style="font-size:11px;color:var(--dim);cursor:pointer;margin-left:4px" onclick="event.stopPropagation();deleteAgent('${currentCompany}','${a.id}','${a.emoji} ${a.name}')" title="삭제">✕</span></div><div class="agent-role">${a.role}</div><div class="agent-meta"><span>${done}/${total}</span></div>${total?`<div class="pbar"><div class="pfill" style="width:${prog}%"></div></div>`:''}</div>`;
+    const cls=a.status==='registering'?'registering':a.status==='idle'?'idle':hasActive?'working':'active';
+    const lbl=cls==='registering'?'⏳ 생성 중...':cls==='working'?'🔄 작업중':cls==='active'?'🟢 활성':'⏳ 대기';
+    const dis=a.status==='registering'?'pointer-events:none;opacity:.6':'';
+    return `<div class="agent-card ${cls}" style="${dis}"><div class="agent-top"><span class="agent-emoji">${a.emoji}</span><span class="agent-name">${a.name}</span><span class="agent-tag ${cls}" style="margin-left:auto">${lbl}</span><span style="font-size:11px;color:var(--dim);cursor:pointer;margin-left:4px" onclick="event.stopPropagation();deleteAgent('${currentCompany}','${a.id}','${a.emoji} ${a.name}')" title="삭제">✕</span></div><div class="agent-role">${a.role}</div><div class="agent-meta"><span>${done}/${total}</span></div>${total?`<div class="pbar"><div class="pfill" style="width:${prog}%"></div></div>`:''}</div>`;
   }).join('');
   const allTasks=c.agents.flatMap(a=>(a.tasks||[]).map(t=>({...t,agent:a})));
   document.getElementById('task-list').innerHTML=allTasks.length?allTasks.map(t=>{
