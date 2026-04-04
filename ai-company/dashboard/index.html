@@ -33,10 +33,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .agent-emoji{font-size:16px}.agent-name{font-size:12px;font-weight:600;color:#f1f5f9}
 .agent-role{font-size:9px;color:var(--dim);margin-top:1px}
 .agent-meta{display:flex;justify-content:space-between;margin-top:4px;font-size:9px;color:var(--dim)}
-.agent-tag{font-size:8px;padding:1px 6px;border-radius:6px}
+.agent-tag{font-size:9px;padding:2px 8px;border-radius:6px;font-weight:600}
 .agent-tag.active{background:#064e3b;color:#6ee7b7}
 .agent-tag.working{background:#78350f;color:#fcd34d}
-.agent-tag.idle{background:#1f2937;color:#9ca3af}
+.agent-tag.idle{background:#1e293b;color:#64748b;border:1px solid #334155}
 .pbar{height:2px;background:#374151;border-radius:2px;margin-top:4px;overflow:hidden}
 .pfill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .5s}
 .chat-panel{display:flex;flex-direction:column}
@@ -304,8 +304,8 @@ function renderCompany(c){
     const tasks=a.tasks||[],done=tasks.filter(t=>t.status==='completed').length,total=tasks.length;
     const prog=total?Math.round(done/total*100):0,hasActive=tasks.some(t=>t.status==='in-progress');
     const cls=a.status==='idle'?'idle':hasActive?'working':'active';
-    const lbl=cls==='working'?'작업중':cls==='active'?'활성':'대기';
-    return `<div class="agent-card ${cls}"><div class="agent-top"><span class="agent-emoji">${a.emoji}</span><span class="agent-name">${a.name}</span><span style="margin-left:auto;font-size:11px;color:var(--dim);cursor:pointer" onclick="event.stopPropagation();deleteAgent('${currentCompany}','${a.id}','${a.emoji} ${a.name}')" title="삭제">✕</span></div><div class="agent-role">${a.role}</div><div class="agent-meta"><span>${done}/${total}</span><span class="agent-tag ${cls}">${lbl}</span></div>${total?`<div class="pbar"><div class="pfill" style="width:${prog}%"></div></div>`:''}</div>`;
+    const lbl=cls==='working'?'🔄 작업중':cls==='active'?'🟢 활성':'⏳ 대기';
+    return `<div class="agent-card ${cls}"><div class="agent-top"><span class="agent-emoji">${a.emoji}</span><span class="agent-name">${a.name}</span><span class="agent-tag ${cls}" style="margin-left:auto">${lbl}</span><span style="font-size:11px;color:var(--dim);cursor:pointer;margin-left:4px" onclick="event.stopPropagation();deleteAgent('${currentCompany}','${a.id}','${a.emoji} ${a.name}')" title="삭제">✕</span></div><div class="agent-role">${a.role}</div><div class="agent-meta"><span>${done}/${total}</span></div>${total?`<div class="pbar"><div class="pfill" style="width:${prog}%"></div></div>`:''}</div>`;
   }).join('');
   const allTasks=c.agents.flatMap(a=>(a.tasks||[]).map(t=>({...t,agent:a})));
   document.getElementById('task-list').innerHTML=allTasks.length?allTasks.map(t=>{

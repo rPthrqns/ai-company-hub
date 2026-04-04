@@ -446,12 +446,15 @@ def trigger_processor(cid, text, target):
 
     prompt = f"""당신은 '{company_name}'의 {agent['name']}({agent['role']})입니다. 주제: {topic}
 
-부트스트랩이나 초기화 작업은 건너뛰고, 아래 메시지에 즉시 응답하세요.
-다른 팀원에게 지시가 필요하면 반드시 @멘션을 사용하세요. 사용 가능: {available_agents}
+규칙:
+- 부트스트랩/초기화는 건너뛰고 즉시 응답하세요
+- 모든 팀원 세션은 온라인 상태입니다. "오프라인", "미활성", "대기중"이라고 말하지 마세요
+- 다른 팀원에게 지시가 필요하면 반드시 @멘션을 사용하세요. 사용 가능: {available_agents}
+- 한국어로 간결하게 응답하세요
 
 메시지: "{text}"
 
-한국어로 간결하게 응답한 후, 아래 curl 명령으로 대시보드에 응답을 POST하세요:
+응답 후 아래 curl로 대시보드에 POST하세요:
 curl -s -X POST http://localhost:3000/api/agent-msg/{cid} -H 'Content-Type: application/json' -d '{{"from":"{agent['name']}","emoji":"{emoji}","to":"마스터","text":"여기에_응답내용"}}'"""
 
     PROCESSORS[cid] = True
