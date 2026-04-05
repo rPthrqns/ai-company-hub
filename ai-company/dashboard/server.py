@@ -1026,7 +1026,7 @@ def trigger_processor(cid, text, target):
             ['openclaw', 'agent', '--agent', agent_id, '--local', '-m', prompt],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        stdout, stderr = proc.communicate(timeout=60)
+        stdout, stderr = proc.communicate(timeout=180)
         if proc.returncode != 0:
             print(f"[WARN] processor {agent_id} failed: {stderr.decode()[:200]}")
         else:
@@ -1060,7 +1060,7 @@ def trigger_processor(cid, text, target):
                         ['openclaw', 'agent', '--agent', agent_id, '--local', '-m', prompt],
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE
                     )
-                    stdout2, stderr2 = proc2.communicate(timeout=60)
+                    stdout2, stderr2 = proc2.communicate(timeout=180)
                     reply2 = stdout2.decode().strip()
                     lines2 = reply2.split('\n')
                     clean2 = [l for l in lines2 if not l.startswith('[') and not l.startswith('(agent') and l.strip()]
