@@ -36,8 +36,6 @@ def _reset_stuck_agents():
     except Exception as e:
         print(f"[reset] error: {e}")
 
-_reset_stuck_agents()
-
 # Default agent templates per role
 AGENT_TEMPLATES = {
     "ceo": {"name": "CEO", "role": {"ko":"총괄","en":"Executive","ja":"総責任者","zh":"总负责人"}, "emoji": "👔"},
@@ -2092,6 +2090,7 @@ def ensure_agents_registered():
 init_companies()
 ensure_agents_registered()
 restore_running_tasks()
+_reset_stuck_agents()
 print(f"🚀 AI Company Hub: http://localhost:{PORT}")
 
 with ReusableTCPServer(("", PORT), Handler) as httpd:
