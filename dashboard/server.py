@@ -1742,6 +1742,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if upper != from_agent.upper() and m_name.lower() in existing_ids and upper not in seen:
                 seen.add(upper)
                 lock_key = f"{cid}:{upper}"
+                # 체인 멘션도 칸반에 대기 추가
+                task_title = extract_task_from_instruction(instruction)
+                if task_title:
+                    add_board_task(cid, task_title, upper, '대기', [], '')
+                    update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
+                    print(f"[auto-task] {upper}: '{task_title}' 대기 추가 (체인 멘션)")
                 with PROCESSORS_LOCK:
                     is_running = lock_key in PROCESSORS
                 if not is_running:
@@ -1759,6 +1765,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if upper != from_agent.upper() and m_name.lower() in existing_ids and upper not in seen:
                     seen.add(upper)
                     lock_key = f"{cid}:{upper}"
+                    # 한줄 멘션도 칸반에 대기 추가
+                    task_title = extract_task_from_instruction(instruction)
+                    if task_title:
+                        add_board_task(cid, task_title, upper, '대기', [], '')
+                        update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
                     with PROCESSORS_LOCK:
                         is_running = lock_key in PROCESSORS
                     if not is_running:
