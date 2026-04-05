@@ -53,7 +53,7 @@ AGENT_TEMPLATES = {
 }
 
 TOPIC_ORGS = {
-    "default": ["ceo", "cmo", "cto"],
+    "default": ["ceo", "coo", "cmo", "cto"],
     "marketing": ["ceo", "cmo", "designer", "cto", "coo"],
     "development": ["ceo", "cto", "designer", "coo"],
     "ecommerce": ["ceo", "cmo", "cto", "sales", "coo", "support"],
@@ -1252,6 +1252,7 @@ def trigger_processor(cid, text, target):
 
     available_agents = ", ".join([f"@{a['id'].upper()}" for a in company.get('agents', []) if a['id'] != agent['id']])
     is_ceo = agent['id'] == 'ceo'
+    is_coo = agent['id'] == 'coo'
 
     # ─── 파일 기반 컨텍스트 (Claw-Empire 방식) ───
     # 대신 워크스페이스 파일을 읽어서 컨텍스트 구성
@@ -1288,6 +1289,26 @@ def trigger_processor(cid, text, target):
     if len(context_str) > 2000:
         context_str = context_str[-2000:]
     
+    # 4) COO 전용: 대기열 + 정기작업 상태
+    coo_context = ''
+    if is_coo:
+        company = get_company(cid)
+        tasks = company.get('board_tasks', [])
+        if tasks:
+            waiting = [t for t in tasks if t.get('status') == '대기']
+            doing = [t for t in tasks if t.get('status') == '진행중']
+            done = [t for t in tasks if t.get('status') == '완료']
+            coo_parts = ['[대기열 현황]']
+            if waiting: coo_parts.append(f"  ⏸️ 대기: {', '.join(t['title'][:20] for t in waiting)}")
+            if doing: coo_parts.append(f"  ⏳ 진행: {', '.join(t['title'][:20] for t in doing)}")
+            coo_parts.append(f"  ✅ 완료: {len(done)}건")
+            coo_context = '\n'.join(coo_parts)
+        recurring = company.get('recurring_tasks', [])
+        if recurring:
+            active_r = [r for r in recurring if r.get('status') == 'running']
+            if active_r:
+                coo_context += '\n[정기작업] ' + ', '.join(r.get('title','')[:20] for r in active_r)
+    
     # 4) 대화 20개 초과 시 백그라운드 자동 요약 (파일 요약도 함께)
     if len(chat_history) > SUMMARY_THRESHOLD:
         threading.Thread(target=auto_summarize, args=(cid,), daemon=True).start()
@@ -1316,6 +1337,25 @@ def trigger_processor(cid, text, target):
 워크스페이스: {agent_workspace}
 
 ⚠️ 당신은 총괄입니다. 직접 작업을 수행하지 마세요. 마스터의 요청을 받으면 반드시 @멘션으로 팀원에게 작업을 분배하세요. 형식: @CMO 구체적인 지시 내용 (한 줄에 하나씩)
+
+{COMPLEX_PROMPT}
+
+{f"=== 에이전트 메모리 ===\n{memory_context}\n" if memory_context else ""}{task_context}{f"=== 현재 상황 (파일+최근 대화) ===\n{context_str}\n" if context_str else ""}
+메시지: "{text}"
+답변:"""
+    elif is_coo:
+        prompt = f"""당신은 '{company_name}'의 비서 {agent['name']}({agent['role']})입니다. 주제: {topic}
+
+팀원: {available_agents}
+공유 결과물 폴더: {company_workspace}/deliverables/
+
+⚠️ 당신은 운영 비서입니다. 다음을 관리하세요:
+1. 대기열 — 어느 작업이 대기/진행/완료인지 파악하고 정체된 작업을 CEO에게 보고하세요
+2. 결과물 — _shared/deliverables/에 파일이 정상적으로 업로드되었는지 확인하세요
+3. 정기작업 — 예정된 반복 작업이 정상 실행되는지 모니터하세요
+4. 진행률 — 전체 프로젝트 진행 상황을 요약해서 보고하세요
+
+@CEO에게 정기적으로 현황을 보고하세요. 팀원에게도 @멘션으로 상태 확인을 요청할 수 있습니다.
 
 {COMPLEX_PROMPT}
 
@@ -1731,8 +1771,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
                 threading.Thread(target=trigger_processor, args=(cid, instruction, target), daemon=True).start()
         elif not is_mention_msg:
-            # 일반 채팅 → CEO가 응답 (기존 동작)
+            # 일반 채팅 → CEO가 응답
             threading.Thread(target=trigger_processor, args=(cid, text, 'CEO'), daemon=True).start()
+            # COO도 현황 보고
+            coo_exists = any(a['id'] == 'coo' for a in company.get('agents', []))
+            if coo_exists:
+                threading.Thread(target=trigger_processor, args=(cid, '현재 프로젝트 현황을 간단히 보고하세요.', 'COO'), daemon=True).start()
 
     # ─── Agent Message Handler ───
     def _handle_agent_msg(self, path, body):
