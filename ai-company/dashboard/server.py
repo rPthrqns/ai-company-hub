@@ -746,9 +746,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._json({"ok": True, "msg": msg})
 
             # Chain: detect @mentions in agent response and trigger next agents
-            # Only chain from CEO (to prevent loops) and max 1 level deep
             mentions = re.findall(r'@(\w+)', text)
-            if mentions and from_agent.upper() == 'CEO':
+            if mentions:
                 existing_ids = {a['id'] for a in company.get('agents', [])}
                 seen = set()
                 for target in mentions:
@@ -1027,7 +1026,8 @@ def trigger_processor(cid, text, target):
   @CTO "시스템 점검 완료 보고"
 - 존재하는 팀원에게만 @멘션하세요. 없는 직책(CFO 등)은 절대 멘션하지 마세요
 - 한 줄에 한 팀원씩만 지시하세요
-- 팀원으로부터 받은 보고를 정리하고, 필요하면 마스터에게 보고하세요
+- 팀원으로부터 받은 보고는 마스터에게 정리해서 보고하세요. 보고만 받은 것에 대해 같은 팀원에게 다시 지시하지 마세요
+- 팀원의 응답이 보고/확인 내용이라면 추가 지시 없이 마스터에게 요약만 전달하세요
 - @마스터는 절대 멘션하지 마세요
 - 한국어로 간결하게 응답하세요
 - 응답 내용만 출력하세요. curl이나 외부 명령은 실행하지 마세요
