@@ -746,20 +746,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._json({"ok": True, "msg": msg})
 
             # Chain: detect @mentions in agent response and trigger next agents
+            # Only chain from CEO (to prevent loops) and max 1 level deep
             mentions = re.findall(r'@(\w+)', text)
-            if mentions:
+            if mentions and from_agent.upper() == 'CEO':
                 existing_ids = {a['id'] for a in company.get('agents', [])}
                 seen = set()
                 for target in mentions:
                     target_upper = target.upper()
                     if target_upper != from_agent.upper() and target.lower() in existing_ids and target_upper not in seen:
                         seen.add(target_upper)
-                        # Cooldown: skip if this agent was recently triggered (10s)
-                        chain_key = f"{cid}:{target_upper}"
-                        last_trigger = CHAIN_COOLDOWNS.get(chain_key, 0)
-                        if time.time() - last_trigger < 10:
+                        # Skip if already processing this agent
+                        lock_key = f"{cid}:{target_upper}"
+                        if lock_key in PROCESSORS:
                             continue
-                        CHAIN_COOLDOWNS[chain_key] = time.time()
                         # Extract per-target instruction
                         agent_ids = [a['id'] for a in company['agents']]
                         instruction = text
@@ -974,7 +973,6 @@ class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
 
 PROCESSORS = {}
-CHAIN_COOLDOWNS = {}  # {cid:agent_id: timestamp}
 
 def trigger_processor(cid, text, target):
     company = get_company(cid)
@@ -1000,6 +998,22 @@ def trigger_processor(cid, text, target):
     available_agents = ", ".join([f"@{a['id'].upper()}" for a in company.get('agents', []) if a['id'] != agent['id']])
     is_ceo = agent['id'] == 'ceo'
 
+    # Build recent chat context (last 10 messages)
+    recent_chat = company.get('chat', [])[-10:]
+    context_str = ''
+    if recent_chat:
+        context_lines = []
+        for m in recent_chat[-10:]:
+            sender = m.get('from', '?')
+            msg_text = (m.get('text', '') or '')[:300]  # limit per message
+            if m.get('type') == 'system':
+                context_lines.append(f"[시스템] {msg_text}")
+            elif m.get('type') == 'user':
+                context_lines.append(f"[마스터] {msg_text}")
+            else:
+                context_lines.append(f"[{sender}] {msg_text}")
+        context_str = '\n'.join(context_lines)
+
     if is_ceo:
         prompt = f"""당신은 '{company_name}'의 {agent['name']}({agent['role']})입니다. 주제: {topic}
 
@@ -1016,11 +1030,10 @@ def trigger_processor(cid, text, target):
 - 팀원으로부터 받은 보고를 정리하고, 필요하면 마스터에게 보고하세요
 - @마스터는 절대 멘션하지 마세요
 - 한국어로 간결하게 응답하세요
-- 마크다운 표(|), 이모지 장식, 이미지, 특수기호(📊🎯📋🔧🚨 등) 사용 금지. 순수 텍스트와 번호리스트만 사용하세요
-- 답변은 짧고 핵심만 작성하세요. 길게 쓰면 잘릴 수 있습니다
 - 응답 내용만 출력하세요. curl이나 외부 명령은 실행하지 마세요
-- 긴 내용은 한 번에 쓰지 말고 여러 번 나눠서 보내세요. 시스템이 자동으로 분할 전송합니다
+- 긴 내용은 한 번에 쓰지 말고 여러 번 나눠서 보내세요
 
+{f"최근 대화:\n{context_str}\n" if context_str else ""}
 메시지: "{text}"
 답변:"""
     else:
@@ -1037,11 +1050,10 @@ def trigger_processor(cid, text, target):
   @CEO "점검 완료했습니다"
   @CMO "디자인 검토 부탁"
 - 한국어로 간결하게 응답하세요
-- 마크다운 표(|), 이모지 장식, 이미지, 특수기호(📊🎯📋🔧🚨 등) 사용 금지. 순수 텍스트와 번호리스트만 사용하세요
-- 답변은 짧고 핵심만 작성하세요. 길게 쓰면 잘릴 수 있습니다
 - 응답 내용만 출력하세요. curl이나 외부 명령은 실행하지 마세요
-- 긴 내용은 한 번에 쓰지 말고 여러 번 나눠서 보내세요. 시스템이 자동으로 분할 전송합니다
+- 긴 내용은 한 번에 쓰지 말고 여러 번 나눠서 보내세요
 
+{f"최근 대화:\n{context_str}\n" if context_str else ""}
 메시지: "{text}"
 답변:"""
 
