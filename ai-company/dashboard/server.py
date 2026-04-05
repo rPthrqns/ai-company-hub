@@ -754,6 +754,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     target_upper = target.upper()
                     if target_upper != from_agent.upper() and target.lower() in existing_ids and target_upper not in seen:
                         seen.add(target_upper)
+                        # Cooldown: skip if this agent was recently triggered (10s)
+                        chain_key = f"{cid}:{target_upper}"
+                        last_trigger = CHAIN_COOLDOWNS.get(chain_key, 0)
+                        if time.time() - last_trigger < 10:
+                            continue
+                        CHAIN_COOLDOWNS[chain_key] = time.time()
                         # Extract per-target instruction
                         agent_ids = [a['id'] for a in company['agents']]
                         instruction = text
@@ -968,6 +974,7 @@ class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
 
 PROCESSORS = {}
+CHAIN_COOLDOWNS = {}  # {cid:agent_id: timestamp}
 
 def trigger_processor(cid, text, target):
     company = get_company(cid)
