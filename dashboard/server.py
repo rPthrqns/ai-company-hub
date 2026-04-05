@@ -1376,9 +1376,23 @@ def trigger_processor(cid, text, target):
         stdout, stderr = proc.communicate(timeout=180)
         reply_raw = stdout.decode().strip()
         print(f"[processor] {agent_id} reply={len(reply_raw)}chars rc={proc.returncode}")
-        if proc.returncode != 0:
-            print(f"[WARN] processor {agent_id} failed: {stderr.decode()[:200]}")
-        else:
+        
+        # 실패 또는 빈 응답 시 1회 재시도
+        if proc.returncode != 0 or not reply_raw or 'No reply from agent' in reply_raw:
+            print(f"[RETRY] {agent_id} first attempt failed, retrying in 5s...")
+            time.sleep(5)
+            proc2 = subprocess.Popen(
+                ['openclaw', 'agent', '--agent', agent_id, '--session-id', f"{session_id}-retry", '--local', '-m', prompt],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            stdout2, stderr2 = proc2.communicate(timeout=180)
+            reply_raw = stdout2.decode().strip()
+            print(f"[RETRY] {agent_id} reply={len(reply_raw)}chars rc={proc2.returncode}")
+            if proc2.returncode != 0:
+                print(f"[WARN] processor {agent_id} failed after retry: {stderr2.decode()[:200]}")
+        
+        reply = ''
+        if reply_raw and 'No reply from agent' not in reply_raw:
             lines = reply_raw.split('\n')
             clean_lines = [l for l in lines if not l.startswith('[') and not l.startswith('(agent') and l.strip()]
             reply = '\n'.join(clean_lines).strip()
@@ -2116,6 +2130,43 @@ init_companies()
 ensure_agents_registered()
 restore_running_tasks()
 print(f"🚀 AI Company Hub: http://localhost:{PORT}")
+
+def _watchdog():
+    """10초마다 에이전트 상태 체크, working 30초 이상이면 강제 active 복원"""
+    import time as _t
+    working_since = {}
+    while True:
+        _t.sleep(10)
+        try:
+            companies = load_json(COMPANIES_FILE, [])
+            for c in companies:
+                cid = c['id']
+                for a in c.get('agents', []):
+                    aid = a['id']
+                    st = a.get('status', 'active')
+                    key = f"{cid}:{aid}"
+                    if st == 'working':
+                        if key not in working_since:
+                            working_since[key] = _t.time()
+                        elif _t.time() - working_since[key] > 200:
+                            # 200초 이상 working이면 강제 복원
+                            print(f"[watchdog] {aid} stuck {int(_t.time()-working_since[key])}s → active")
+                            comp = get_company(cid)
+                            if comp:
+                                for ag in comp.get('agents', []):
+                                    if ag['id'] == aid:
+                                        ag['status'] = 'active'
+                                save_company(comp)
+                                update_company(cid, {'agents': comp['agents']})
+                            with PROCESSORS_LOCK:
+                                PROCESSORS.pop(key, None)
+                            working_since.pop(key, None)
+                    else:
+                        working_since.pop(key, None)
+        except Exception as e:
+            print(f"[watchdog] error: {e}")
+
+threading.Thread(target=_watchdog, daemon=True).start()
 
 with ReusableTCPServer(("", PORT), Handler) as httpd:
     httpd.serve_forever()
