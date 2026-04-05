@@ -273,13 +273,13 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   <!-- Right: Kanban + Recurring Tasks tabs -->
   <div class="panel">
     <div class="right-tabs">
-      <button class="right-tab" onclick="switchRightTab('kanban')">📋 칸반</button>
+      <button class="right-tab active" onclick="switchRightTab('kanban')">📋 칸반</button>
       <button class="right-tab" onclick="switchRightTab('recurring')">🔄 정기</button>
       <button class="right-tab" onclick="switchRightTab('deliverables')">📂 결과물</button>
     </div>
     <div class="right-panel-content">
       <!-- Kanban Tab -->
-      <div class="tab-pane" id="tab-kanban">
+      <div class="tab-pane active" id="tab-kanban">
         <div class="kanban-wrapper">
           <div class="kanban-board" id="kanban-board"></div>
         </div>
