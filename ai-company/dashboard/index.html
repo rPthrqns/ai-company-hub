@@ -52,6 +52,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .chat-body{display:flex;flex-direction:column}.chat-msg.user .chat-body{align-items:flex-end}
 .chat-sender{font-size:9px;color:var(--dim);font-weight:600}
 .chat-bubble{padding:7px 11px;border-radius:10px;font-size:12px;color:#e2e8f0;line-height:1.5;white-space:pre-wrap}
+.chat-bubble table{border-collapse:collapse;margin:6px 0;font-size:11px;width:100%}
+.chat-bubble th,.chat-bubble td{border:1px solid #4a5568;padding:4px 8px;text-align:left}
+.chat-bubble th{background:#2d3748;font-weight:600}
+.chat-bubble code{background:#1a202c;padding:1px 4px;border-radius:3px;font-size:11px}
 .chat-msg.agent .chat-bubble{background:var(--card);border:1px solid #2d3748;border-radius:3px 10px 10px 10px}
 .chat-msg.user .chat-bubble{background:#1e3a5f;border-radius:10px 3px 10px 10px}
 .chat-bubble .mention{color:#60a5fa;font-weight:600}
@@ -381,6 +385,33 @@ function renderCompanyUI(c){
   document.getElementById('task-list').innerHTML=taskHtml;
 }
 
+function mdToHtml(text){
+  // Tables
+  let h=text.replace(/(?:^|\n)((?:\|[^\n]+\|\n)+)/g,(match,table)=>{
+    const rows=table.trim().split('\n').filter(r=>r.trim());
+    if(rows.length<2)return match;
+    let html='<table>';
+    rows.forEach((row,i)=>{
+      const cells=row.split('|').filter(c=>c.trim()!=='').map(c=>c.trim());
+      const tag=i===0?'th':'td';
+      html+='<tr>'+cells.map(c=>`<${tag}>${c}</${tag}>`).join('')+'</tr>';
+    });
+    html+='</table>';return '\n'+html+'\n';
+  });
+  // Bold, italic, code, line breaks
+  h=h.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/`(.+?)`/g,'<code>$1</code>')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    // restore HTML tables
+    .replace(/&lt;table&gt;/g,'<table>').replace(/&lt;\/table&gt;/g,'</table>')
+    .replace(/&lt;tr&gt;/g,'<tr>').replace(/&lt;\/tr&gt;/g,'</tr>')
+    .replace(/&lt;th&gt;/g,'<th>').replace(/&lt;\/th&gt;/g,'</th>')
+    .replace(/&lt;td&gt;/g,'<td>').replace(/&lt;\/td&gt;/g,'</td>')
+    .replace(/\n/g,'<br>');
+  return h;
+}
+
 function appendChat(m){
   const el=document.getElementById('chat-messages'),isUser=m.type==='user',isSystem=m.type==='system';
   if(isSystem){
@@ -388,7 +419,8 @@ function appendChat(m){
     el.scrollTop=el.scrollHeight;return;
   }
   const avatar=isUser?'👤':(m.emoji||'👔');
-  el.innerHTML+=`<div class="chat-msg ${isUser?'user':'agent'}"><div class="avatar">${avatar}</div><div class="chat-body"><div class="chat-sender">${m.from}</div><div class="chat-bubble">${(m.text||'').replace(/@(\w+)/g,'<span class="mention">@$1</span>')}</div></div></div>`;
+  const bodyHtml=mdToHtml(m.text||'').replace(/@(\w+)/g,'<span class="mention">@$1</span>');
+  el.innerHTML+=`<div class="chat-msg ${isUser?'user':'agent'}"><div class="avatar">${avatar}</div><div class="chat-body"><div class="chat-sender">${m.from}</div><div class="chat-bubble">${bodyHtml}</div></div></div>`;
   el.scrollTop=el.scrollHeight;
 }
 
@@ -615,11 +647,12 @@ function connectSSE(){
       if(idx>=0)companies[idx]=c;
       // Append only new messages
       const chat=(c.chat||[]);const chatLen=chat.length;
-      if(chatLen>lastChatLen){
-        chat.slice(lastChatLen).forEach(m=>appendChat(m));
+      const newMsgs=chat.slice(lastChatLen);
+      if(newMsgs.length>0){
+        newMsgs.forEach(m=>appendChat(m));
         lastChatLen=chatLen;
       }
-      if(chat.slice(lastChatLen).some(m=>m.type==='agent')) document.getElementById('typing').classList.remove('show');
+      if(newMsgs.some(m=>m.type==='agent')) document.getElementById('typing').classList.remove('show');
       if(activeAgentFilter)renderPanels();
       else renderCompanyUI(c);
     }
