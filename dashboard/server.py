@@ -1315,7 +1315,7 @@ def trigger_processor(cid, text, target):
 공유 결과물 폴더: {company_workspace}/deliverables/
 워크스페이스: {agent_workspace}
 
-⚠️ 중요: 팀원이 있으면 반드시 @CMO @CTO 등으로 작업을 분배하세요. 혼자서 모든 작업을 하지 마세요. 각 팀원의 역할에 맞게 @멘션으로 지시하세요.
+⚠️ 당신은 총괄입니다. 직접 작업을 수행하지 마세요. 마스터의 요청을 받으면 반드시 @멘션으로 팀원에게 작업을 분배하세요. 형식: @CMO 구체적인 지시 내용 (한 줄에 하나씩)
 
 {COMPLEX_PROMPT}
 
@@ -1329,7 +1329,7 @@ def trigger_processor(cid, text, target):
 공유 결과물 폴더: {company_workspace}/deliverables/
 워크스페이스: {agent_workspace}
 
-⚠️ 중요: 팀원이 있으면 반드시 @CMO @CTO 등으로 작업을 분배하세요. 혼자서 모든 작업을 하지 마세요. 각 팀원의 역할에 맞게 @멘션으로 지시하세요.
+@CEO에게 보고하세요. 받은 지시에 대해 구체적으로 작업을 수행하고, 결과물을 _shared/deliverables/에 저장하세요.
 
 {COMPLEX_PROMPT}
 
