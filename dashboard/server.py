@@ -17,6 +17,27 @@ PROCESSORS_LOCK = threading.Lock()
 AGENT_LOCK = threading.Lock()
 _running_task_threads = set()
 
+def _reset_stuck_agents():
+    """서버 시작 시 working 상태인 에이전트를 active로 리셋"""
+    try:
+        for f in sorted(DATA.glob('company-*.json')):
+            cid = f.stem
+            if cid.startswith('company-'):
+                c = get_company(cid)
+                if c:
+                    changed = False
+                    for a in c.get('agents', []):
+                        if a.get('status') == 'working':
+                            a['status'] = 'active'
+                            changed = True
+                    if changed:
+                        save_company(c)
+                        print(f"[reset] {cid}: stuck agents reset to active")
+    except Exception as e:
+        print(f"[reset] error: {e}")
+
+_reset_stuck_agents()
+
 # Default agent templates per role
 AGENT_TEMPLATES = {
     "ceo": {"name": "CEO", "role": {"ko":"총괄","en":"Executive","ja":"総責任者","zh":"总负责人"}, "emoji": "👔"},
