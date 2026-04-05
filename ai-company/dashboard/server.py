@@ -716,10 +716,29 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             mentions = re.findall(r'@(\w+)', text)
             if mentions:
                 existing_ids = {a['id'] for a in company.get('agents', [])}
+                seen = set()
                 for target in mentions:
                     target_upper = target.upper()
-                    if target_upper != from_agent.upper() and target.lower() in existing_ids:
-                        threading.Thread(target=trigger_processor, args=(cid, text, target_upper), daemon=True).start()
+                    if target_upper != from_agent.upper() and target.lower() in existing_ids and target_upper not in seen:
+                        seen.add(target_upper)
+                        # Extract per-target instruction
+                        agent_ids = [a['id'] for a in company['agents']]
+                        instruction = text
+                        pattern = rf'@{re.escape(target)}\s*"([^"]*)"'
+                        m = re.search(pattern, text, re.IGNORECASE)
+                        if m:
+                            instruction = m.group(1)
+                        else:
+                            pattern2 = rf'@{re.escape(target)}\s*[:\-]?\s*(.+)'
+                            m2 = re.search(pattern2, text, re.IGNORECASE)
+                            if m2:
+                                line = m2.group(1).strip()
+                                next_at = re.search(r'@(\w+)', line)
+                                if next_at and next_at.group(1).lower() in agent_ids:
+                                    instruction = line[:next_at.start()].strip()
+                                else:
+                                    instruction = line
+                        threading.Thread(target=trigger_processor, args=(cid, instruction, target_upper), daemon=True).start()
 
         elif self.path == '/api/company/delete':
             cid = body.get('id')
@@ -944,12 +963,15 @@ def trigger_processor(cid, text, target):
     if is_ceo:
         prompt = f"""당신은 '{company_name}'의 {agent['name']}({agent['role']})입니다. 주제: {topic}
 
+팀원: {available_agents}
+
 규칙:
 - 부트스트랩/초기화는 건너뛰고 즉시 응답하세요
 - 마스터의 모든 메시지에 반드시 응답하세요. 멘션 없어도 바로 답장하세요
 - 팀원들에게 지시를 내릴 때는 반드시 한 줄에 한 팀원씩 @멘션으로 명확하게 지시하세요. 예:
   @CMO 주간 성과 리포트 작성
   @CTO 시스템 점검 완료 보고
+- 존재하는 팀원에게만 @멘션하세요. 없는 직책(CFO 등)은 절대 멘션하지 마세요
 - 여러 팀원에게 지시할 때는 각 줄에 @멘션을 포함하세요
 - 팀원으로부터 받은 보고를 정리하고, 필요하면 마스터에게 보고하세요
 - @마스터는 절대 멘션하지 마세요
