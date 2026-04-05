@@ -1650,13 +1650,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         # 멘션 메시지면 에이전트들에게 instruction 전달
         if is_mention_msg and instruction:
-            # 멘션 내용에서 작업 자동 추출 → 타겟 칸반에 추가
+            # 멘션 내용에서 작업 자동 추출 → 타겟 칸반에 추가 (무조건)
             for target in targets:
-                task_title = extract_task_from_instruction(instruction)
-                if task_title:
-                    add_board_task(cid, task_title, target, '대기', [], '')
-                    update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
-                    print(f"[auto-task] {target}: '{task_title}' 대기 추가 (멘션에서)")
+                task_title = extract_task_from_instruction(instruction) or instruction[:30]
+                add_board_task(cid, task_title, target, '대기', [], '')
+                update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
                 threading.Thread(target=trigger_processor, args=(cid, instruction, target), daemon=True).start()
         elif not is_mention_msg:
             # 일반 채팅 → CEO가 응답 (기존 동작)
@@ -1742,12 +1740,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if upper != from_agent.upper() and m_name.lower() in existing_ids and upper not in seen:
                 seen.add(upper)
                 lock_key = f"{cid}:{upper}"
-                # 체인 멘션도 칸반에 대기 추가
-                task_title = extract_task_from_instruction(instruction)
-                if task_title:
-                    add_board_task(cid, task_title, upper, '대기', [], '')
-                    update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
-                    print(f"[auto-task] {upper}: '{task_title}' 대기 추가 (체인 멘션)")
+                # 체인 멘션도 칸반에 대기 추가 (멘션이면 무조건)
+                task_title = extract_task_from_instruction(instruction) or instruction[:30]
+                add_board_task(cid, task_title, upper, '대기', [], '')
+                update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
+                print(f"[auto-task] {upper}: '{task_title}' 대기 추가 (체인 멘션)")
                 with PROCESSORS_LOCK:
                     is_running = lock_key in PROCESSORS
                 if not is_running:
@@ -1765,11 +1762,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if upper != from_agent.upper() and m_name.lower() in existing_ids and upper not in seen:
                     seen.add(upper)
                     lock_key = f"{cid}:{upper}"
-                    # 한줄 멘션도 칸반에 대기 추가
-                    task_title = extract_task_from_instruction(instruction)
-                    if task_title:
-                        add_board_task(cid, task_title, upper, '대기', [], '')
-                        update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
+                    # 한줄 멘션도 칸반에 대기 추가 (무조건)
+                    task_title = extract_task_from_instruction(instruction) or instruction[:30]
+                    add_board_task(cid, task_title, upper, '대기', [], '')
+                    update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
                     with PROCESSORS_LOCK:
                         is_running = lock_key in PROCESSORS
                     if not is_running:
