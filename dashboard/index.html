@@ -110,35 +110,24 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 @keyframes blink{0%,100%{opacity:.3}50%{opacity:1}}
 
 /* Kanban Board */
-.kanban-wrapper{display:flex;flex-direction:column;height:100%;overflow:hidden}
-.kanban-board{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;flex:1;overflow:hidden}
-.kanban-col{display:flex;flex-direction:column;overflow:hidden;background:var(--bg);border-radius:8px;padding:8px}
-.kanban-col-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding:4px 8px;border-radius:4px;text-align:center}
-.kanban-col-title.todo{background:#1e293b;color:#94a3b8}
-.kanban-col-title.doing{background:#78350f;color:#fcd34d}
-.kanban-col-title.done{background:#064e3b;color:#6ee7b7}
-.kanban-cards{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
-.kanban-card{background:var(--card);border-radius:6px;padding:7px 9px;cursor:pointer;transition:all .15s;border-left:3px solid #4b5563;font-size:11px}
-.kanban-card:hover{background:#253047;transform:translateX(1px)}
-.kanban-card.todo{border-left-color:#64748b}
-.kanban-card.doing{border-left-color:var(--yellow)}
-.kanban-card.done{border-left-color:var(--green);opacity:.7}
-.kanban-card .kc-title{font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.kanban-card .kc-meta{display:flex;gap:6px;margin-top:3px;font-size:9px;color:var(--dim);flex-wrap:wrap}
-.kanban-card .kc-agent{background:#1e3a5f;color:#93c5fd;padding:1px 5px;border-radius:4px;font-size:8px}
-.kanban-card .kc-deadline{color:#fbbf24}
-.kanban-card .kc-deps{color:var(--accent2);font-size:8px}
-.kanban-card .kc-actions{display:flex;gap:4px;margin-top:4px;justify-content:flex-end}
-.kanban-card .kc-del{background:none;border:none;color:#64748b;cursor:pointer;font-size:11px;padding:0;transition:color .15s}
-.kanban-card .kc-del:hover{color:var(--red)}
-.kanban-inline-form{background:var(--card);border-radius:6px;padding:7px 9px;display:none}
-.kanban-inline-form.show{display:block}
-.kanban-inline-form input,.kanban-inline-form select{width:100%;background:var(--bg);border:1px solid #374151;border-radius:5px;padding:4px 7px;color:var(--text);font-size:10px;outline:none;margin-bottom:4px}
-.kanban-inline-form input:focus,.kanban-inline-form select:focus{border-color:var(--accent)}
-.kanban-inline-form .kf-actions{display:flex;gap:4px}
-.kanban-inline-form button{border:none;padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer}
-.kanban-inline-form .kf-ok{background:var(--accent);color:white}
-.kanban-inline-form .kf-cancel{background:transparent;color:var(--dim);border:1px solid #374151}
+.task-table{width:100%;border-collapse:collapse;font-size:11px}
+.task-table th{text-align:left;padding:6px 10px;font-size:9px;color:var(--dim);border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.5px;font-weight:600;position:sticky;top:0;background:var(--card)}
+.task-table td{padding:7px 10px;border-bottom:1px solid #1e293b;vertical-align:middle}
+.task-table tr:hover{background:#1a2332}
+.task-table .task-title{color:#e2e8f0;font-weight:500;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-table .task-title.done-title{color:#6ee7b7;text-decoration:line-through;opacity:.7}
+.task-table .task-agent{font-size:10px;white-space:nowrap}
+.task-table .task-status{font-size:10px;font-weight:600;white-space:nowrap}
+.task-table .status-wait{color:#94a3b8}
+.task-table .status-doing{color:#fcd34d}
+.task-table .status-done{color:#6ee7b7}
+.task-table .task-del{cursor:pointer;opacity:.4;font-size:10px}
+.task-table .task-del:hover{opacity:1;color:#ef4444}
+.task-add-row{display:flex;gap:6px;padding:8px 0;align-items:center}
+.task-add-row input,.task-add-row select{background:var(--bg);border:1px solid #374151;border-radius:5px;padding:5px 8px;color:var(--text);font-size:11px;outline:none}
+.task-add-row input{flex:1}
+.task-add-row select{width:100px}
+.task-add-row button{border:none;padding:5px 10px;border-radius:5px;font-size:11px;cursor:pointer;background:var(--accent);color:white}.kanban-inline-form .kf-cancel{background:transparent;color:var(--dim);border:1px solid #374151}
 
 /* Recurring Tasks */
 .rtask-card{background:var(--card);border-radius:8px;padding:9px;margin-bottom:5px;border-left:3px solid #4b5563;transition:all .15s}
@@ -603,56 +592,36 @@ function renderKanban(){
   const tasks=cachedBoardTasks||[];
   const company=companies.find(c=>c.id===currentCompany);
   const agents=company?company.agents:[];
-  const todo=tasks.filter(t=>t.status==='대기');
-  const doing=tasks.filter(t=>t.status==='진행중');
-  const done=tasks.filter(t=>t.status==='완료').sort((a,b)=>(b.updated_at||b.created_at||'').localeCompare(a.updated_at||a.created_at||''));
+  const sorted=[...tasks].sort((a,b)=>{
+    const order={'진행중':0,'대기':1,'완료':2};
+    return (order[a.status]||3)-(order[b.status]||3);
+  });
+  const statusIcon=s=>s==='진행중'?'⏳ 진행 중':s==='완료'?'✅ 완료':'⏸️ 대기';
+  const statusCls=s=>s==='진행중'?'status-doing':s==='완료'?'status-done':'status-wait';
+  const titleCls=s=>s==='완료'?'task-title done-title':'task-title';
 
-  function agentName(aid){
-    const a=agents.find(x=>x.id===aid);
-    return a?`${a.emoji} ${a.name}`:'';
-  }
+  function agentName(aid){const a=agents.find(x=>x.id===aid);return a?`${a.emoji} ${a.name}`:'';}
 
-  function cardHtml(t,cls){
-    const aName=agentName(t.agent_id);
-    const dl=t.deadline?`<span class="kc-deadline">📅 ${t.deadline}</span>`:'';
-    const deps=(t.depends_on&&t.depends_on.length)?`<span class="kc-deps">🔗 ${t.depends_on.length} 의존</span>`:'';
-    const nextStatus=cls==='todo'?'진행중':cls==='doing'?'완료':'대기';
-    const nextLabel=cls==='todo'?'▶ 진행':cls==='doing'?'✅ 완료':'↩ 대기';
-    return `<div class="kanban-card ${cls}" onclick="cycleTaskStatus('${t.id}','${nextStatus}')">
-      <div class="kc-title">${t.title}</div>
-      <div class="kc-meta">${aName?`<span class="kc-agent">${aName}</span>`:''}${dl}${deps}</div>
-      <div class="kc-actions" onclick="event.stopPropagation()">
-        <button class="kc-del" onclick="deleteBoardTask('${t.id}','${t.title.replace(/'/g,"\\'")}')" title="삭제">🗑</button>
-      </div>
-    </div>`;
-  }
-
-  board.innerHTML=`
-    <div class="kanban-col">
-      <div class="kanban-col-title todo">대기 (${todo.length})</div>
-      <div class="kanban-cards">${todo.map(t=>cardHtml(t,'todo')).join('')}</div>
-    </div>
-    <div class="kanban-col">
-      <div class="kanban-col-title doing">진행중 (${doing.length})</div>
-      <div class="kanban-cards">${doing.map(t=>cardHtml(t,'doing')).join('')}</div>
-    </div>
-    <div class="kanban-col">
-      <div class="kanban-col-title done">완료 (${done.length})</div>
-      <div class="kanban-cards">${done.map(t=>cardHtml(t,'done')).join('')}</div>
-    </div>
-    <div class="kanban-inline-form ${kanbanFormVisible?'show':''}" id="kanban-form">
-      <input id="bt-title" placeholder="작업명..." onkeydown="if(event.key==='Enter')addBoardTask()"/>
-      <select id="bt-agent"><option value="">담당자 (선택)</option>${agents.map(a=>`<option value="${a.id}">${a.emoji} ${a.name}</option>`).join('')}</select>
-      <input id="bt-deadline" type="date" />
-      <div class="kf-actions">
-        <button class="kf-cancel" onclick="toggleKanbanForm()">취소</button>
-        <button class="kf-ok" onclick="addBoardTask()">추가</button>
-      </div>
-    </div>
-  `;
+  board.innerHTML=`<table class="task-table">
+    <thead><tr><th>작업</th><th>담당</th><th>상태</th><th></th></tr></thead>
+    <tbody>${sorted.map(t=>`<tr>
+      <td class="${titleCls(t.status)}" title="${t.title}">${t.title}</td>
+      <td class="task-agent">${agentName(t.agent_id)}</td>
+      <td class="task-status ${statusCls(t.status)}">${statusIcon(t.status)}</td>
+      <td class="task-del" onclick="deleteBoardTask('${t.id}','${t.title.replace(/'/g,"\\'")}')" title="삭제">🗑</td>
+    </tr>`).join('')}</tbody>
+  </table>
+  <div class="task-add-row">
+    <input id="bt-title" placeholder="새 작업..." onkeydown="if(event.key==='Enter')addBoardTask()"/>
+    <select id="bt-agent"><option value="">담당</option>${agents.map(a=>`<option value="${a.id}">${a.emoji} ${a.name}</option>`).join('')}</select>
+    <button onclick="addBoardTask()">＋</button>
+  </div>`;
 }
 
 function toggleKanbanForm(){
+  const el=document.getElementById('bt-title');
+  if(el)el.focus();
+}function toggleKanbanForm(){
   kanbanFormVisible=!kanbanFormVisible;
   renderKanban();
   if(kanbanFormVisible){const el=document.getElementById('bt-title');if(el)el.focus();}
