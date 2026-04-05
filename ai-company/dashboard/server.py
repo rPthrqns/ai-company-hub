@@ -28,6 +28,33 @@ BASE = Path("/home/sra/.openclaw/workspace/ai-company")
 DATA = BASE / "data"
 COMPANIES_FILE = DATA / "companies.json"
 
+def split_message(text, max_chars=1500):
+    """Split long messages at natural boundaries (paragraphs, then lines)."""
+    if len(text) <= max_chars:
+        return [text]
+    chunks = []
+    paragraphs = text.split('\n\n')
+    current = ''
+    for para in paragraphs:
+        if len(current) + len(para) + 2 > max_chars and current:
+            chunks.append(current.strip())
+            current = ''
+        current += para + '\n\n'
+        # If single paragraph exceeds limit, split by lines
+        if len(current) > max_chars:
+            lines = current.strip().split('\n')
+            current = ''
+            line_chunk = ''
+            for line in lines:
+                if len(line_chunk) + len(line) + 1 > max_chars and line_chunk:
+                    chunks.append(line_chunk.strip())
+                    line_chunk = ''
+                line_chunk += line + '\n'
+            current = line_chunk
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks if chunks else [text]
+
 def load_json(path, default=None):
     if path.exists() and path.stat().st_size > 0:
         try:
@@ -984,7 +1011,8 @@ def trigger_processor(cid, text, target):
 - 한국어로 간결하게 응답하세요
 - 마크다운 표(|), 이모지 장식, 이미지, 특수기호(📊🎯📋🔧🚨 등) 사용 금지. 순수 텍스트와 번호리스트만 사용하세요
 - 답변은 짧고 핵심만 작성하세요. 길게 쓰면 잘릴 수 있습니다
-- curl이나 외부 명령을 실행하지 마세요. 응답 내용만 출력하세요
+- 응답 내용만 출력하세요. curl이나 외부 명령은 실행하지 마세요
+- 긴 내용은 한 번에 쓰지 말고 여러 번 나눠서 보내세요. 시스템이 자동으로 분할 전송합니다
 
 메시지: "{text}"
 답변:"""
@@ -1004,7 +1032,8 @@ def trigger_processor(cid, text, target):
 - 한국어로 간결하게 응답하세요
 - 마크다운 표(|), 이모지 장식, 이미지, 특수기호(📊🎯📋🔧🚨 등) 사용 금지. 순수 텍스트와 번호리스트만 사용하세요
 - 답변은 짧고 핵심만 작성하세요. 길게 쓰면 잘릴 수 있습니다
-- curl이나 외부 명령을 실행하지 마세요. 응답 내용만 출력하세요
+- 응답 내용만 출력하세요. curl이나 외부 명령은 실행하지 마세요
+- 긴 내용은 한 번에 쓰지 말고 여러 번 나눠서 보내세요. 시스템이 자동으로 분할 전송합니다
 
 메시지: "{text}"
 답변:"""
@@ -1043,10 +1072,21 @@ def trigger_processor(cid, text, target):
             if reply and len(reply) > 1 and reply not in ('No reply from agent.', ''):
                 import urllib.request
                 try:
-                    payload = json.dumps({
-                        "from": agent['name'], "emoji": emoji,
-                        "to": "마스터", "text": reply
-                    }).encode()
+                    # Split long responses into multiple messages (max ~1500 chars each)
+                    chunks = split_message(reply, max_chars=1500)
+                    for chunk in chunks:
+                        payload = json.dumps({
+                            "from": agent['name'], "emoji": emoji,
+                            "to": "마스터", "text": chunk
+                        }).encode()
+                        req = urllib.request.Request(
+                            f'http://localhost:3000/api/agent-msg/{cid}',
+                            data=payload,
+                            headers={'Content-Type': 'application/json'}
+                        )
+                        urllib.request.urlopen(req, timeout=5)
+                        if len(chunks) > 1:
+                            time.sleep(1)  # slight delay between chunks
                     req = urllib.request.Request(
                         f'http://localhost:3000/api/agent-msg/{cid}',
                         data=payload,
@@ -1071,9 +1111,11 @@ def trigger_processor(cid, text, target):
                     reply2 = '\n'.join(clean2).strip()
                     if reply2 and len(reply2) > 1:
                         import urllib.request
-                        payload = json.dumps({"from": agent['name'], "emoji": emoji, "to": "마스터", "text": reply2}).encode()
-                        req = urllib.request.Request(f'http://localhost:3000/api/agent-msg/{cid}', data=payload, headers={'Content-Type': 'application/json'})
-                        urllib.request.urlopen(req, timeout=5)
+                        chunks2 = split_message(reply2, max_chars=1500)
+                        for chunk2 in chunks2:
+                            payload = json.dumps({"from": agent['name'], "emoji": emoji, "to": "마스터", "text": chunk2}).encode()
+                            req = urllib.request.Request(f'http://localhost:3000/api/agent-msg/{cid}', data=payload, headers={'Content-Type': 'application/json'})
+                            urllib.request.urlopen(req, timeout=5)
                 except: pass
     except Exception as e:
         print(f"Processor error: {e}")
