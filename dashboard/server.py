@@ -1293,7 +1293,7 @@ def trigger_processor(cid, text, target):
 
 팀원: {available_agents}
 워크스페이스: {agent_workspace}
-공유 결과물 폴더: {company_workspace}/_shared/deliverables/
+공유 결과물 폴더: {company_workspace}/deliverables/
 워크스페이스: {agent_workspace}
 
 {COMPLEX_PROMPT}
@@ -1306,7 +1306,7 @@ def trigger_processor(cid, text, target):
 
 팀원: {available_agents}
 워크스페이스: {agent_workspace}
-공유 결과물 폴더: {company_workspace}/_shared/deliverables/
+공유 결과물 폴더: {company_workspace}/deliverables/
 워크스페이스: {agent_workspace}
 
 {COMPLEX_PROMPT}
