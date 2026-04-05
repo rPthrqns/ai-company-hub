@@ -106,12 +106,10 @@ def get_org_for_topic(topic):
 def setup_agent_workspace(agent_workspace, name, role, company_name, emoji):
     """Initialize agent workspace with required files."""
     agent_workspace.mkdir(parents=True, exist_ok=True)
-    # AGENTS.md (required by OpenClaw)
-    if not (agent_workspace / "AGENTS.md").exists():
-        (agent_workspace / "AGENTS.md").write_text(
-            "# AGENTS.md\n\n## Instructions\n"
-            "Read SOUL.md and IDENTITY.md on startup. Do not run bootstrap.\n"
-            "When you receive a message, respond in character.\n")
+    # AGENTS.md — always overwrite with minimal agent-specific version
+    (agent_workspace / "AGENTS.md").write_text(
+        "# AGENTS.md\n\n당신은 회사 에이전트입니다. SOUL.md를 읽고 역할에 맞게 응답하세요.\n"
+        "부트스트랩은 건너뛰세요. 받은 메시지에 항상 응답하세요.\n")
     # SOUL.md with role context
     if not (agent_workspace / "SOUL.md").exists():
         (agent_workspace / "SOUL.md").write_text(
