@@ -198,6 +198,12 @@ def auto_create_agents(cid, company, text, time_str):
 
     if created_logs:
         update_company(cid, {"agents": company['agents'], "activity_log": company.get('activity_log', []) + created_logs})
+        # Notify CEO about new team member
+        ceo_agent = next((a for a in company['agents'] if a['id'] == 'ceo'), None)
+        if ceo_agent:
+            new_names = ', '.join(log['text'] for log in created_logs)
+            ceo_prompt = f"새 팀원이 합류했습니다: {new_names}. 마스터에게 보고하고, 필요하면 다른 팀원들에게 소개해주세요."
+            threading.Thread(target=trigger_processor, args=(cid, ceo_prompt, 'CEO'), daemon=True).start()
     return created_logs
 
 # ─── Recurring Task System ───
