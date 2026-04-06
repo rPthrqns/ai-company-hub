@@ -1446,22 +1446,33 @@ def nudge_agent(cid, text, target):
         task_lines = '\n'.join(f"- [{t.get('status','')}] {t.get('title','')}" for t in my_tasks[:5])
         context_parts.append(f"=== 내 작업 ===\n{task_lines}")
     context = '\n\n'.join(context_parts)
-
-    prompt = f"{context}\n\n메시지: {text}" if context else text
-
     # Use persistent session for memory continuity
     session_id = f"{agent_id}-main"
 
     # Queue-based processing
     key = f"{cid}:{aid}"
 
-    def _process():
+    def _process(msg):
         if key in _AGENT_BUSY:
-            return  # Already processing, skip
+            return
         _AGENT_BUSY.add(key)
+        # Rebuild context for this message
+        newspaper = generate_newspaper(cid)
+        standup = read_agent_standup(cid, aid)
+        inbox = read_agent_inbox(cid, aid)
+        ctx_parts = []
+        if newspaper: ctx_parts.append(f"=== 브리프 ===\n{newspaper}")
+        if inbox: ctx_parts.append(f"=== 받은 메시지 (inbox) ===\n{inbox}")
+        if standup: ctx_parts.append(f"=== 내 스탠드업 ===\n{standup}")
+        my_tasks = [t for t in get_company(cid).get('board_tasks', [])
+                    if t.get('agent_id') == aid and t.get('status') in ('대기', '진행중')]
+        if my_tasks:
+            ctx_parts.append("=== 내 작업 ===\n" + '\n'.join(f"- [{t.get('status','')}] {t.get('title','')}" for t in my_tasks[:5]))
+        ctx = '\n\n'.join(ctx_parts)
+        prompt = f"{ctx}\n\n메시지: {msg}" if ctx else msg
+
         nudge_start = time.time()
         try:
-            # Set working status
             c = get_company(cid)
             if c:
                 for a in c.get('agents', []):
@@ -1469,8 +1480,6 @@ def nudge_agent(cid, text, target):
                         a['status'] = 'working'
                         break
                 update_company(cid, {"agents": c['agents']})
-
-            # Auto-advance kanban
             c = get_company(cid)
             for t in c.get('board_tasks', []):
                 if t.get('agent_id') == aid and t.get('status') == '대기':
@@ -1512,7 +1521,6 @@ def nudge_agent(cid, text, target):
                     est_tokens = max(len(clean) // 4, 100)
                     est_cost = round(est_tokens * COST_PER_1K_TOKENS / 1000, 6)
                     update_agent_cost(cid, aid, est_tokens, est_cost)
-                    # Auto-complete oldest doing task
                     c = get_company(cid)
                     if c:
                         for t in c.get('board_tasks', []):
@@ -1548,25 +1556,20 @@ def nudge_agent(cid, text, target):
                             break
                     update_company(cid, {"agents": c['agents']})
             except: pass
-            # Process next in queue if any
             if key in _AGENT_QUEUES and _AGENT_QUEUES[key]:
                 next_text = _AGENT_QUEUES[key].popleft()
                 if not _AGENT_QUEUES[key]:
                     del _AGENT_QUEUES[key]
-                threading.Thread(target=_process_one, args=(next_text,), daemon=True).start()
-
-    def _process_one(t):
-        _process(t)
+                threading.Thread(target=_process, args=(next_text,), daemon=True).start()
 
     if key in _AGENT_BUSY:
-        # Already running, queue it (keep only last 3)
         if key not in _AGENT_QUEUES:
             from collections import deque
             _AGENT_QUEUES[key] = deque(maxlen=3)
         _AGENT_QUEUES[key].append(text)
         print(f"[nudge] {agent_id} busy, queued (len={len(_AGENT_QUEUES[key])})")
     else:
-        threading.Thread(target=_process_one, args=(text,), daemon=True).start()
+        threading.Thread(target=_process, args=(text,), daemon=True).start()
 
 def _check_user_intervention(cid, text, from_agent):
     """Detect if agent response contains requests needing user action (credentials, accounts, etc)."""
