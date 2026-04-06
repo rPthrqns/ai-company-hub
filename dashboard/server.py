@@ -67,18 +67,6 @@ TOPIC_ORGS = {
 
 LANG = {"ko":"한국어","en":"English","ja":"日本語","zh":"中文"}
 
-TASK_KEYWORDS = ['모니터링', '감시', '정기', '주기', '매시간', '매일', '자동', '반복', '정기적', '보고', '리포트', '상황공유', '업데이트', '보고해', '보고올려', '보고드려', '매주', '주간', '격주', '월간', '매월', '매년']
-
-TASK_INTERVAL_KEYWORDS = {
-    '매시간': 60, '한시간마다': 60, '1시간마다': 60, '시간마다': 60,
-    '매일': 1440, '하루에한번': 1440, '매분': 1, '30분마다': 30, '30분': 30,
-    '10분마다': 10, '10분': 10, '5분마다': 5, '5분': 5, '15분마다': 15, '15분': 15,
-    '2시간마다': 120, '2시간': 120, '3시간마다': 180, '6시간마다': 360, '12시간마다': 720,
-    '반나절마다': 720, '주': 10080, '일주일마다': 10080,
-    '매주': 10080, '주간': 10080, '매주금요일': 10080, '매주 금요일': 10080,
-    '격주': 20160, '월간': 43200, '매월': 43200, '매년': 525600,
-}
-
 ROLE_MAP = {
     'ceo': ('CEO', '최고경영자', '👔'), 'cto': ('CTO', '기술총괄', '💻'),
     'cfo': ('CFO', '재무총괄', '💰'), 'coo': ('COO', '운영총괄', '⚙️'),
@@ -958,7 +946,12 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji):
         (agent_workspace / "SOUL.md").write_text(
             f"# SOUL.md\n당신은 '{company_name}'의 {name}({role})입니다.\n"
             f"팀원들에게 @멘션으로 지시하고, @CEO에게 보고하세요.\n"
-            f"한국어로 소통합니다.\n")
+            f"한국어로 소통합니다.\n"
+            f"\n## 정기작업 관리\n"
+            f"- 정기적으로 확인해야 할 업무가 있다면 [CRON_ADD:작업명:분단위:프롬프트]로 등록하세요\n"
+            f"  예: [CRON_ADD:트래픽체크:60:현재 트래픽과 이상 징후를 보고하세요]\n"
+            f"- 불필요한 정기작업은 [CRON_DEL:작업명]으로 삭제하세요\n"
+            f"- 자신의 업무 범위 내에서 자발적으로 정기작업을 등록해도 됩니다\n")
     if not (agent_workspace / "IDENTITY.md").exists():
         (agent_workspace / "IDENTITY.md").write_text(
             f"- **Name:** {name}\n- **Role:** {role}\n- **Emoji:** {emoji}\n")
@@ -1037,69 +1030,7 @@ def _register_and_activate(agent_id, workspace, name, role):
     except Exception as e:
         print(f"[register] {agent_id} activate failed: {e}")
 
-def auto_create_agents(cid, company, text, time_str):
-    """Detect agent creation intent and auto-create agents."""
-    keywords = ['만들', '생성', '추가', '고용', '채용', '영입', '합류', '배치', '구성']
-    if not any(kw in text for kw in keywords):
-        return []
-
-    existing_ids = {a['id'] for a in company.get('agents', [])}
-    created_logs = []
-
-    for key, (name, role, emoji) in ROLE_MAP.items():
-        if key in existing_ids:
-            continue
-        if name.lower() in text.lower() or key in text.lower() or role in text:
-            aid = key
-            agent_id = f"{cid}-{aid}"
-            agent_workspace = DATA / cid / "workspaces" / aid
-            register_agent(agent_id, agent_workspace, name, role, company.get('name',''), emoji)
-            agent = {"id": aid, "agent_id": agent_id, "name": name, "emoji": emoji,
-                     "role": role, "status": "active", "tasks": [], "messages": [], "prompt": "",
-                     "cost": {"total_tokens": 0, "total_cost": 0.0, "last_run_cost": 0.0}}
-            company['agents'].append(agent)
-            created_logs.append({"time": time_str, "agent": "시스템", "text": f"🆕 {emoji} {name} ({role}) 합류"})
-
-    if created_logs:
-        update_company(cid, {"agents": company['agents'], "activity_log": company.get('activity_log', []) + created_logs})
-        ceo_agent = next((a for a in company['agents'] if a['id'] == 'ceo'), None)
-        if ceo_agent:
-            new_names = ', '.join(log['text'] for log in created_logs)
-            ceo_prompt = f"새 팀원이 합류했습니다: {new_names}. 마스터에게 보고하고, 필요하면 다른 팀원들에게 소개해주세요."
-            threading.Thread(target=trigger_processor, args=(cid, ceo_prompt, 'CEO'), daemon=True).start()
-    return created_logs
-
 # ─── Recurring Task System ───
-
-def detect_task_intent(text, company):
-    """Detect if text contains recurring task creation intent."""
-    if not any(kw in text for kw in TASK_KEYWORDS):
-        return None
-    interval = 60
-    for kw, mins in sorted(TASK_INTERVAL_KEYWORDS.items(), key=lambda x: -len(x[0])):
-        if kw in text:
-            interval = mins
-            break
-    title = text[:50].strip()
-    for w in ['해줘', '해주세요', '부탁해', '부탁드려', '시작해', '진행해', '해도 돼', '좀', '부탁']:
-        title = title.replace(w, '').strip()
-    if not title:
-        title = '정기 작업'
-    mention = re.search(r'@(\w+)', text)
-    target = mention.group(1).lower() if mention else None
-    if not target and company:
-        agents = company.get('agents', [])
-        if agents:
-            target = agents[0]['id']
-    agent = None
-    if target and company:
-        agent = next((a for a in company.get('agents', []) if a['id'] == target), None)
-    return {
-        'title': title, 'prompt': text, 'interval_minutes': interval,
-        'agent_id': agent['id'] if agent else (target or 'ceo'),
-        'agent_name': agent['name'] if agent else (target.upper() if target else 'CEO'),
-        'agent_emoji': agent['emoji'] if agent else '👔',
-    }
 
 def add_recurring_task(cid, title, prompt, interval_minutes, agent_id, agent_name, agent_emoji):
     company = get_company(cid)
@@ -1884,10 +1815,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         msg = {"from": "마스터", "text": text, "time": time_str, "type": "user", "mention": is_mention_msg}
 
-        created_agents = auto_create_agents(cid, company, text, time_str)
         company["chat"].append(msg)
-        if created_agents:
-            company["activity_log"].extend(created_agents)
         targets_str = ', '.join(f'@{t}' for t in targets)
         company["activity_log"].append({"time": time_str, "agent": "마스터", "text": f"{targets_str} {instruction}" if is_mention_msg else text})
 
@@ -1979,13 +1907,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 msg = {"from": from_agent, "emoji": emoji, "text": ml, "time": time_str, "type": "agent", "mention": True}
                 company["chat"].append(msg)
             company["activity_log"].append({"time": time_str, "agent": from_agent, "text": mention_text})
-
-        created_agents = auto_create_agents(cid, company, text, time_str)
-        if created_agents:
-            company["activity_log"].extend(created_agents)
-            update_company(cid, {"agents": company["agents"], "activity_log": company["activity_log"]})
-            self._json({"ok": True, "msg": msg, "created": [c["text"] for c in created_agents]})
-            return
 
         update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
         self._json({"ok": True, "msg": msg})
