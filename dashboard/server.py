@@ -1949,8 +1949,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif path.startswith('/api/approval-reject/'):
             self._handle_approval_resolve(path, body, 'rejected')
 
+        elif path.startswith('/api/webhook/'):
+            self._handle_webhook(path, body)
+
         else:
             self._json({"error": "not found"}, 404)
+
+
+    def _handle_webhook(self, path, body):
+        """Receive external webhook and forward to agents."""
+        cid = path.split('/')[-1]
+        company = get_company(cid)
+        if not company: self._json({"error": "not found"}, 404); return
+        wh_secret = company.get('webhook_secret', '')
+        req_secret = self.headers.get('X-Webhook-Secret', '')
+        if wh_secret and req_secret != wh_secret:
+            self._json({"error": "unauthorized"}, 401); return
+        text = body.get('text', body.get('message', json.dumps(body, ensure_ascii=False)))
+        if not text: self._json({"error": "empty"}, 400); return
+        now = datetime.now(); time_str = now.strftime('%H:%M')
+        msg = {"from": "webhook", "emoji": "🔗", "text": text[:500], "time": time_str, "type": "user"}
+        company["chat"].append(msg)
+        update_company(cid, {"chat": company["chat"]})
+        sse_broadcast('chat', {'msg': msg})
+        # Forward to CEO
+        threading.Thread(target=nudge_agent, args=(cid, f"[웹훅 수신] {text[:200]}", 'CEO'), daemon=True).start()
+        self._json({"ok": True})
 
     # ─── Chat Handler ───
     def _handle_chat(self, path, body):
