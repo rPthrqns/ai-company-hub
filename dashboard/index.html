@@ -619,9 +619,6 @@ function renderKanban(){
 }
 
 function toggleKanbanForm(){
-  const el=document.getElementById('bt-title');
-  if(el)el.focus();
-}function toggleKanbanForm(){
   kanbanFormVisible=!kanbanFormVisible;
   renderKanban();
   if(kanbanFormVisible){const el=document.getElementById('bt-title');if(el)el.focus();}
@@ -631,9 +628,8 @@ async function addBoardTask(){
   const title=document.getElementById('bt-title').value.trim();
   if(!title)return;
   const agent_id=document.getElementById('bt-agent').value;
-  const deadline=document.getElementById('bt-deadline').value;
   try{
-    const res=await fetch(`/api/board-task-add/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,agent_id,deadline,depends_on:[]})});
+    const res=await fetch(`/api/board-task-add/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,agent_id,depends_on:[]})});
     const data=await res.json();
     if(data.ok){toast(`📌 "${title}" 작업 추가됨`);cachedBoardTasks.push(data.task);kanbanFormVisible=false;renderKanban();}
     else toast('작업 추가 실패');

@@ -7,7 +7,7 @@ from datetime import datetime
 
 # ─── Constants ───
 PORT = 3000
-BASE = Path("/home/sra/.openclaw/workspace/ai-company")
+BASE = Path(__file__).resolve().parent.parent
 DATA = BASE / "data"
 COMPANIES_FILE = DATA / "companies.json"
 SSE_CLIENTS = []
@@ -183,7 +183,7 @@ def process_task_commands(cid, text, agent_id):
         title = m.group(1).strip()
         for t in board_tasks:
             if t.get('title','') == title and t.get('status') == '대기':
-                t['status'] = '진행'
+                t['status'] = '진행중'
                 results.append(f"🚀 '{title}' 시작")
                 break
     
@@ -193,8 +193,8 @@ def process_task_commands(cid, text, agent_id):
         reason = m.group(2).strip()
         for t in board_tasks:
             if t.get('title','') == title:
-                t['status'] = '차단'
-                results.append(f"🚫 '{title}' 차단 ({reason})")
+                t['status'] = '검토'
+                results.append(f"🚫 '{title}' 검토 필요 ({reason})")
                 break
     
     if results:
@@ -241,7 +241,7 @@ def process_task_commands(cid, text, agent_id):
             title = title.strip().rstrip('.,;')
             if len(title) < 2: continue
             if any(t.get('title','') == title for t in board_tasks): continue
-            task = add_board_task(cid, title, agent_id, '진행', [], '')
+            task = add_board_task(cid, title, agent_id, '진행중', [], '')
             if task:
                 board_tasks.append(task)
                 results.append(f"📋 '{title}' 자동 추가됨 (진행)")
@@ -334,31 +334,110 @@ def gen_id(prefix="id"):
 def init_companies():
     if not COMPANIES_FILE.exists():
         save_json(COMPANIES_FILE, [])
-    # 서버 시작 시 working 상태인 에이전트를 active로 리셋
-    for f in sorted(DATA.glob('company-*.json')):
-        if '-queue' in f.stem: continue
-        try:
-            data = load_json(f)
-            if not data: continue
-            changed = False
-            for a in data.get('agents', []):
-                if a.get('status') == 'working':
-                    a['status'] = 'active'
-                    changed = True
+
+    recovered = []
+    seen_ids = set()
+
+    def _consider_company_data(data, source_name=None):
+        if not data or 'id' not in data:
+            return
+        cid = data.get('id')
+        if not cid or cid in seen_ids:
+            return
+        changed = False
+        for a in data.get('agents', []):
+            if a.get('status') == 'working':
+                a['status'] = 'active'
+                changed = True
+        state_file = DATA / f"{cid}.json"
+        if changed or not state_file.exists():
+            save_json(state_file, data)
             if changed:
-                save_json(f, data)
-                print(f"[reset] {f.stem}: stuck agents reset")
-        except: pass
-    return load_json(COMPANIES_FILE)
+                print(f"[reset] {cid}: stuck agents reset")
+            elif source_name:
+                print(f"[init] restored {cid} from {source_name}")
+        recovered.append(data)
+        seen_ids.add(cid)
+
+    # 1) 정상 json state 파일 복구
+    for f in sorted(DATA.glob('*.json')):
+        if f.name == 'companies.json' or '-queue' in f.stem:
+            continue
+        try:
+            _consider_company_data(load_json(f), f.name)
+        except:
+            pass
+
+    # 2) .bak state 파일 복구
+    for f in sorted(DATA.glob('*.json.bak')):
+        if f.name == 'companies.json.bak' or '-queue' in f.stem:
+            continue
+        try:
+            data = json.loads(f.read_text(encoding='utf-8'))
+            _consider_company_data(data, f.name)
+        except:
+            pass
+
+    # 3) companies.json.bak 에서 누락 회사 복구
+    companies_bak = DATA / 'companies.json.bak'
+    if companies_bak.exists():
+        try:
+            bak_list = json.loads(companies_bak.read_text(encoding='utf-8'))
+            for item in bak_list if isinstance(bak_list, list) else []:
+                _consider_company_data(item, companies_bak.name)
+        except:
+            pass
+
+    current = load_json(COMPANIES_FILE, [])
+    current_ids = {c.get('id') for c in current}
+    merged = list(current)
+    for company in recovered:
+        if company.get('id') not in current_ids:
+            merged.append(company)
+    if merged != current:
+        save_json(COMPANIES_FILE, merged)
+        print(f"[init] recovered {len(merged) - len(current)} companies into companies.json")
+    return load_json(COMPANIES_FILE, [])
 
 def get_company(cid):
     state_file = DATA / f"{cid}.json"
     if state_file.exists():
         try:
             data = load_json(state_file)
-            if data: return data
-        except: pass
+            if data:
+                return data
+        except:
+            pass
+
+    # Fallback: recover from companies.json if state file is missing or stale
+    companies = load_json(COMPANIES_FILE, [])
+    for company in companies:
+        if company.get('id') == cid:
+            try:
+                save_json(state_file, company)
+            except:
+                pass
+            return company
     return None
+
+def save_company(company):
+    if not company or 'id' not in company:
+        return None
+    cid = company['id']
+    state_file = DATA / f"{cid}.json"
+    save_json(state_file, company)
+    companies = load_json(COMPANIES_FILE, [])
+    replaced = False
+    for i, c in enumerate(companies):
+        if c.get("id") == cid:
+            companies[i] = company
+            replaced = True
+            break
+    if not replaced:
+        companies.append(company)
+    save_json(COMPANIES_FILE, companies)
+    sse_broadcast('company_update', {"id": cid, "company": company})
+    return company
 
 def update_company(cid, updates):
     state_file = DATA / f"{cid}.json"
@@ -1336,7 +1415,12 @@ def trigger_processor(cid, text, target):
 공유 결과물 폴더: {company_workspace}/deliverables/
 워크스페이스: {agent_workspace}
 
-⚠️ 당신은 총괄입니다. 직접 작업을 수행하지 마세요. 마스터의 요청을 받으면 반드시 @멘션으로 팀원에게 작업을 분배하세요. 형식: @CMO 구체적인 지시 내용 (한 줄에 하나씩)
+⚠️ 당신은 총괄입니다. 직접 작업을 수행하지 마세요.
+- 마스터가 일반 질문/요약/상황 확인을 하면, 우선 당신이 직접 간단히 답변하세요.
+- 팀원 위임이 꼭 필요한 경우에만 @멘션으로 작업을 분배하세요.
+- 이미 최근 대화/결과물/작업으로 답할 수 있으면 추가 위임하지 마세요.
+- 한 번의 응답에서 팀원 위임은 최대 1건만 하세요.
+- 단순 상태 보고에는 후속 작업을 자동 생성하지 마세요.
 
 {COMPLEX_PROMPT}
 
@@ -1349,13 +1433,11 @@ def trigger_processor(cid, text, target):
 팀원: {available_agents}
 공유 결과물 폴더: {company_workspace}/deliverables/
 
-⚠️ 당신은 운영 비서입니다. 다음을 관리하세요:
-1. 대기열 — 어느 작업이 대기/진행/완료인지 파악하고 정체된 작업을 CEO에게 보고하세요
-2. 결과물 — _shared/deliverables/에 파일이 정상적으로 업로드되었는지 확인하세요
-3. 정기작업 — 예정된 반복 작업이 정상 실행되는지 모니터하세요
-4. 진행률 — 전체 프로젝트 진행 상황을 요약해서 보고하세요
-
-@CEO에게 정기적으로 현황을 보고하세요. 팀원에게도 @멘션으로 상태 확인을 요청할 수 있습니다.
+⚠️ 당신은 운영 비서입니다.
+- 요청받은 경우에만 현황을 정리해서 @CEO에게 보고하세요.
+- 능동적으로 연쇄 지시를 만들지 마세요.
+- 팀원 상태 확인이 꼭 필요할 때만 단일 @멘션 1건까지 허용됩니다.
+- 단순 요약/상태 보고에서는 새 작업을 만들지 마세요.
 
 {COMPLEX_PROMPT}
 
@@ -1369,7 +1451,9 @@ def trigger_processor(cid, text, target):
 공유 결과물 폴더: {company_workspace}/deliverables/
 워크스페이스: {agent_workspace}
 
-@CEO에게 보고하세요. 팀원에게도 @멘션으로 작업을 요청할 수 있습니다. 받은 지시에 대해 구체적으로 작업을 수행하고, 결과물을 _shared/deliverables/에 저장하세요.
+@CEO에게 보고하세요. 받은 지시에 대해 구체적으로 작업을 수행하고, 결과물을 _shared/deliverables/에 저장하세요.
+- 다른 팀원 @멘션은 정말 필요한 경우에만 1건 이내로 하세요.
+- 단순 보고/요약에서는 새 작업이나 연쇄 지시를 만들지 마세요.
 
 {COMPLEX_PROMPT}
 
@@ -1415,7 +1499,13 @@ def trigger_processor(cid, text, target):
             ['openclaw', 'agent', '--agent', agent_id, '--session-id', session_id, '--local', '-m', prompt],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        stdout, stderr = proc.communicate(timeout=180)
+        try:
+            stdout, stderr = proc.communicate(timeout=180)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            print(f"[WARN] processor timeout: {agent_id}")
+            raise TimeoutError(f"agent timeout: {agent_id}")
         reply_raw = stdout.decode().strip()
         print(f"[processor] {agent_id} reply={len(reply_raw)}chars rc={proc.returncode}")
         
@@ -1629,7 +1719,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
-        body = json.loads(self.rfile.read(length)) if length else {}
+        try:
+            body = json.loads(self.rfile.read(length)) if length else {}
+        except json.JSONDecodeError:
+            self._json({"error": "invalid json"}, 400)
+            return
         path = self.path
 
         # ─── Existing Endpoints ───
@@ -1768,15 +1862,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             for target in targets:
                 task_title = extract_task_from_instruction(instruction) or instruction[:30]
                 add_board_task(cid, task_title, target.lower(), '대기', [], '')
-                update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
+                refreshed_company = get_company(cid)
+                if refreshed_company:
+                    update_company(cid, {'board_tasks': refreshed_company.get('board_tasks', [])})
+                else:
+                    print(f"[WARN] board_tasks update skipped, company missing: {cid}")
                 threading.Thread(target=trigger_processor, args=(cid, instruction, target), daemon=True).start()
         elif not is_mention_msg:
             # 일반 채팅 → CEO가 응답
             threading.Thread(target=trigger_processor, args=(cid, text, 'CEO'), daemon=True).start()
-            # COO도 현황 보고
-            coo_exists = any(a['id'] == 'coo' for a in company.get('agents', []))
-            if coo_exists:
-                threading.Thread(target=trigger_processor, args=(cid, '현재 프로젝트 현황을 간단히 보고하세요.', 'COO'), daemon=True).start()
 
     # ─── Agent Message Handler ───
     def _handle_agent_msg(self, path, body):
@@ -1844,6 +1938,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
         self._json({"ok": True, "msg": msg})
 
+        company_after_update = get_company(cid)
+        if not company_after_update:
+            print(f"[WARN] company missing after update: {cid}")
+            return
+
         # Chain mentions (에이전트→에이전트)
         existing_ids = {a['id'].lower() for a in company.get('agents', [])}
         block_re = re.compile(r'@(\w+)\s*```([\s\S]*?)```', re.MULTILINE)
@@ -1872,7 +1971,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             task_title = extract_task_from_instruction(instruction) or instruction[:30]
             add_board_task(cid, task_title, upper.lower(), '대기', [], '')
         if pending_mentions:
-            update_company(cid, {'board_tasks': get_company(cid).get('board_tasks', [])})
+            refreshed_company = get_company(cid)
+            if refreshed_company:
+                update_company(cid, {'board_tasks': refreshed_company.get('board_tasks', [])})
+            else:
+                print(f"[WARN] board_tasks update skipped, company missing: {cid}")
         for upper, instruction in pending_mentions:
             lock_key = f"{cid}:{upper}"
             print(f"[auto-task] {upper}: task queued (chain mention)")
@@ -2153,10 +2256,13 @@ class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
 
 def ensure_agents_registered():
-    """On startup, re-register all agents from companies data."""
+    """On startup, re-register all agents from companies data and restore missing state files."""
     companies = load_json(COMPANIES_FILE, [])
     for company in companies:
         cid = company['id']
+        state_file = DATA / f"{cid}.json"
+        if not state_file.exists():
+            save_json(state_file, company)
         for agent in company.get('agents', []):
             agent_id = agent.get('agent_id', '')
             if not agent_id:
@@ -2171,6 +2277,7 @@ def ensure_agents_registered():
                 register_agent(agent_id, ws, agent['name'], agent['role'],
                                company.get('name', ''), agent.get('emoji', '🤖'), wait=True)
                 agent['status'] = 'active'
+        save_company(company)
 
 init_companies()
 ensure_agents_registered()
@@ -2178,7 +2285,7 @@ restore_running_tasks()
 print(f"🚀 AI Company Hub: http://localhost:{PORT}")
 
 def _watchdog():
-    """10초마다 에이전트 상태 체크, working 30초 이상이면 강제 active 복원"""
+    """10초마다 에이전트 상태 체크, working이 오래 지속되면 active로 복원"""
     import time as _t
     working_since = {}
     while True:
@@ -2194,8 +2301,7 @@ def _watchdog():
                     if st == 'working':
                         if key not in working_since:
                             working_since[key] = _t.time()
-                        elif _t.time() - working_since[key] > 200:
-                            # 200초 이상 working이면 강제 복원
+                        elif _t.time() - working_since[key] > 60:
                             print(f"[watchdog] {aid} stuck {int(_t.time()-working_since[key])}s → active")
                             comp = get_company(cid)
                             if comp:
