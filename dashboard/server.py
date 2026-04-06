@@ -6,7 +6,8 @@ from pathlib import Path
 from datetime import datetime
 from db import (init_db, migrate_from_json, db_get_company, db_save_company, db_update_company,
                db_get_all_companies, db_delete_company, db_add_chat, db_add_chats, db_add_activity, db_add_activities,
-               db_add_approval, db_get_approvals, db_update_approval, db_get_tasks, db_add_task, db_get_doc, db_save_doc, db_clear_doc_cache)
+               db_add_approval, db_get_approvals, db_update_approval, db_get_tasks, db_add_task, db_update_task, db_delete_task,
+               db_get_doc, db_save_doc, db_clear_doc_cache)
 
 # ─── Constants ───
 PORT = 3000
@@ -512,15 +513,6 @@ def add_board_task(cid, title, agent_id=None, status="대기", depends_on=None, 
     company = get_company(cid)
     if not company:
         return None
-    tasks = company.get('board_tasks', [])
-    # Prevent queue overflow: auto-complete old done tasks when total exceeds 50
-    MAX_TASKS = 50
-    if len(tasks) >= MAX_TASKS:
-        done = [t for t in tasks if t.get('status') == '완료']
-        if done:
-            # Remove oldest completed tasks
-            remove_ids = {t['id'] for t in done[:len(tasks) - MAX_TASKS + 5]}
-            tasks = [t for t in tasks if t['id'] not in remove_ids]
     task = {
         'id': gen_id('bt'),
         'title': title,
@@ -529,9 +521,12 @@ def add_board_task(cid, title, agent_id=None, status="대기", depends_on=None, 
         'depends_on': depends_on or [],
         'deadline': deadline or '',
         'created_at': datetime.now().isoformat(),
+        'updated_at': datetime.now().isoformat(),
     }
-    tasks.append(task)
-    update_company(cid, {'board_tasks': tasks})
+    db_add_task(cid, task)
+    refreshed = get_company(cid)
+    if refreshed:
+        sse_broadcast('company_update', {"id": cid, "company": refreshed})
     return task
 
 def update_board_task_status(cid, task_id, new_status):
@@ -560,7 +555,11 @@ def update_board_task_status(cid, task_id, new_status):
         pass
 
     task['status'] = new_status
-    update_company(cid, {'board_tasks': tasks})
+    task['updated_at'] = datetime.now().isoformat()
+    db_update_task(cid, task_id, {'status': new_status, 'updated_at': task['updated_at']})
+    refreshed = get_company(cid)
+    if refreshed:
+        sse_broadcast('company_update', {"id": cid, "company": refreshed})
 
     # Check dependency chain: if completed, unlock dependents
     unlocked = []
@@ -604,7 +603,12 @@ def check_and_unlock_dependencies(cid, completed_task_id):
                         ).start()
 
     if unlocked:
-        update_company(cid, {'board_tasks': tasks})
+        for t in unlocked:
+            t['updated_at'] = datetime.now().isoformat()
+            db_update_task(cid, t['id'], {'status': '진행중', 'updated_at': t['updated_at']})
+        refreshed = get_company(cid)
+        if refreshed:
+            sse_broadcast('company_update', {"id": cid, "company": refreshed})
         # Log
         now_str = datetime.now().strftime('%H:%M')
         log_entries = [
@@ -612,9 +616,7 @@ def check_and_unlock_dependencies(cid, completed_task_id):
              "text": f"🔗 자동 시작: \"{t['title']}\" (의존성 해결)"}
             for t in unlocked
         ]
-        company = get_company(cid)
-        company['activity_log'] = company.get('activity_log', []) + log_entries
-        update_company(cid, {'activity_log': company['activity_log']})
+        append_activities(cid, log_entries)
 
     return unlocked
 
@@ -622,13 +624,15 @@ def delete_board_task(cid, task_id):
     company = get_company(cid)
     if not company:
         return
-    tasks = company.get('board_tasks', [])
-    tasks = [t for t in tasks if t['id'] != task_id]
+    db_delete_task(cid, task_id)
     # Also remove from goals
     goals = company.get('goals', [])
     for g in goals:
         g['task_ids'] = [tid for tid in g.get('task_ids', []) if tid != task_id]
-    update_company(cid, {'board_tasks': tasks, 'goals': goals})
+    update_company(cid, {'goals': goals})
+    refreshed = get_company(cid)
+    if refreshed:
+        sse_broadcast('company_update', {"id": cid, "company": refreshed})
 
 # ─── Cost Tracking ───
 

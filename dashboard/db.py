@@ -299,11 +299,52 @@ def db_add_task(cid, task):
         conn = _conn()
         count = conn.execute("SELECT COUNT(*) FROM board_tasks WHERE company_id=?", (cid,)).fetchone()[0]
         conn.execute("""INSERT OR REPLACE INTO board_tasks 
-            (id, company_id, title, agent_id, status, depends_on, deadline, created_at, sort_order)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (id, company_id, title, agent_id, status, depends_on, deadline, created_at, updated_at, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task.get('id',''), cid, task.get('title',''), task.get('agent_id',''),
              task.get('status','대기'), json.dumps(task.get('depends_on',[])),
-             task.get('deadline',''), task.get('created_at',''), count))
+             task.get('deadline',''), task.get('created_at',''), task.get('updated_at',''), count))
+        conn.execute("DELETE FROM board_tasks WHERE company_id=? AND id IN (SELECT id FROM board_tasks WHERE company_id=? AND status='완료' ORDER BY sort_order, id LIMIT CASE WHEN (SELECT COUNT(*) FROM board_tasks WHERE company_id=?) > 50 THEN (SELECT COUNT(*) FROM board_tasks WHERE company_id=?) - 45 ELSE 0 END)", (cid, cid, cid, cid))
+        conn.commit()
+        conn.close()
+
+
+def db_update_task(cid, task_id, updates):
+    if not updates:
+        return
+    with _lock:
+        conn = _conn()
+        sets = []
+        vals = []
+        field_map = {
+            'title': 'title',
+            'agent_id': 'agent_id',
+            'status': 'status',
+            'deadline': 'deadline',
+            'created_at': 'created_at',
+            'updated_at': 'updated_at',
+            'sort_order': 'sort_order',
+        }
+        for key, col in field_map.items():
+            if key in updates:
+                sets.append(f"{col}=?")
+                vals.append(updates[key])
+        if 'depends_on' in updates:
+            sets.append("depends_on=?")
+            vals.append(json.dumps(updates['depends_on']))
+        if not sets:
+            conn.close()
+            return
+        vals.extend([task_id, cid])
+        conn.execute(f"UPDATE board_tasks SET {', '.join(sets)} WHERE id=? AND company_id=?", vals)
+        conn.commit()
+        conn.close()
+
+
+def db_delete_task(cid, task_id):
+    with _lock:
+        conn = _conn()
+        conn.execute("DELETE FROM board_tasks WHERE id=? AND company_id=?", (task_id, cid))
         conn.commit()
         conn.close()
 
