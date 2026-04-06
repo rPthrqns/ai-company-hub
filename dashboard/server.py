@@ -1996,7 +1996,32 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         emoji = body.get('emoji', '👔')
         if not text or text in ('No reply from agent.', ''): self._json({"ok": False, "reason": "empty/no_reply"}); return
 
-        text = re.sub(r'@마스터\s*', '', text).strip()
+        # @마스터 멘션 감지 → 승인 요청 자동 생성
+        master_mention = re.search(r'@마스터[
+]?(.*)', text, re.DOTALL)
+        master_request = ''
+        if master_mention:
+            master_request = master_mention.group(1).strip()
+            text = re.sub(r'@마스터[
+]?', '', text).strip()
+            # 승인 요청 생성
+            approval_item = {
+                'id': str(uuid.uuid4())[:8],
+                'from_agent': from_agent,
+                'from_emoji': emoji,
+                'type': '요청',
+                'detail': master_request[:200] if master_request else '승인/확인 요청',
+                'status': 'pending',
+                'time': datetime.now().strftime('%H:%M'),
+                'created_at': datetime.now().isoformat()
+            }
+            approvals = company.get('approvals', [])
+            approvals.append(approval_item)
+            update_company(cid, {'approvals': approvals})
+            print(f"[approval] {from_agent} → @마스터: {master_request[:60]}")
+            # SSE로 승인 알림
+            _sse_send(json.dumps({'type':'approval','approval':approval_item}))
+
         company = get_company(cid)
         if not company: self._json({"error": "not found"}, 404); return
 
