@@ -1408,6 +1408,7 @@ def trigger_processor(cid, text, target):
     lock_key = f"{cid}:{agent['id']}"
     with PROCESSORS_LOCK:
         if lock_key in PROCESSORS:
+            print(f"[SKIP] {lock_key} busy")
             return
         PROCESSORS[lock_key] = True
 
@@ -1421,6 +1422,11 @@ def trigger_processor(cid, text, target):
                         break
                 update_company(cid, {"agents": c['agents']})
         except: pass
+
+    def _done():
+        with PROCESSORS_LOCK:
+            PROCESSORS.pop(lock_key, None)
+        _update_agent_status('active')
 
     # 세션 ID: 에이전트별 고유 + 타임스탬프로 항상 새 세션 보장
     session_id = f"{agent_id}-turn-{int(time.time())}"
@@ -1444,7 +1450,7 @@ def trigger_processor(cid, text, target):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         try:
-            stdout, stderr = proc.communicate(timeout=180)
+            stdout, stderr = proc.communicate(timeout=120)
         except subprocess.TimeoutExpired:
             proc.kill()
             stdout, stderr = proc.communicate()
@@ -1529,11 +1535,7 @@ def trigger_processor(cid, text, target):
     except Exception as e:
         print(f"Processor error: {e}")
     finally:
-        with PROCESSORS_LOCK:
-            PROCESSORS.pop(lock_key, None)
-        _update_agent_status('active')
-
-# ─── HTTP Handler ───
+        _done()
 
 def _check_user_intervention(cid, text, from_agent):
     """Detect if agent response contains requests needing user action (credentials, accounts, etc)."""
