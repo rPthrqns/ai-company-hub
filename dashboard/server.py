@@ -142,28 +142,19 @@ def extract_task_from_instruction(text):
 
 def process_task_commands(cid, text, agent_id):
     """에이전트 응답에서 [TASK_XXX:...] 명령을 파싱해서 칸반에 반영"""
-    company = get_company(cid)
-    if not company: return []
-    
     results = []
-    board_tasks = company.get('board_tasks', [])
+    board_tasks = db_get_tasks(cid)
     
     # TASK_ADD:작업명:우선순위
     for m in re.finditer(r'\[TASK_ADD:([^:]+):([^\]]+)\]', text):
         title = m.group(1).strip()
         priority = m.group(2).strip()
-        # 중복 체크
         if any(t.get('title','') == title for t in board_tasks):
             results.append(f"⚠️ '{title}' 이미 존재")
             continue
         task = add_board_task(cid, title, agent_id, '대기', [], '')
         if task:
-            task['priority'] = priority
-            # 저장
-            company = get_company(cid)
-            company['board_tasks'] = board_tasks
-            save_company(company)
-            update_company(cid, {'board_tasks': company['board_tasks']})
+            db_update_task(cid, task['id'], {'title': f"{title} ({priority})"})
             results.append(f"✅ '{title}' 칸반에 추가됨 ({priority})")
     
     # TASK_DONE:작업명
@@ -171,7 +162,7 @@ def process_task_commands(cid, text, agent_id):
         title = m.group(1).strip()
         for t in board_tasks:
             if t.get('title','') == title and t.get('status') != '완료':
-                t['status'] = '완료'
+                db_update_task(cid, t['id'], {'status': '완료', 'updated_at': datetime.now().isoformat()})
                 results.append(f"🎉 '{title}' 완료 처리")
                 break
     
@@ -180,7 +171,7 @@ def process_task_commands(cid, text, agent_id):
         title = m.group(1).strip()
         for t in board_tasks:
             if t.get('title','') == title and t.get('status') == '대기':
-                t['status'] = '진행중'
+                db_update_task(cid, t['id'], {'status': '진행중', 'updated_at': datetime.now().isoformat()})
                 results.append(f"🚀 '{title}' 시작")
                 break
     
@@ -190,15 +181,11 @@ def process_task_commands(cid, text, agent_id):
         reason = m.group(2).strip()
         for t in board_tasks:
             if t.get('title','') == title:
-                t['status'] = '검토'
+                db_update_task(cid, t['id'], {'status': '검토', 'updated_at': datetime.now().isoformat()})
                 results.append(f"🚫 '{title}' 검토 필요 ({reason})")
                 break
     
     if results:
-        company = get_company(cid)
-        company['board_tasks'] = board_tasks
-        save_company(company)
-        update_company(cid, {'board_tasks': company['board_tasks']})
         print(f"[task_cmds] {agent_id}: {'; '.join(results)}")
     
     # CRON 명령 처리
@@ -216,11 +203,11 @@ def process_task_commands(cid, text, agent_id):
     
     for m in re.finditer(r'\[CRON_DEL:([^\]]+)\]', text):
         title = m.group(1).strip()
-        tasks = company.get('recurring_tasks', [])
-        company['recurring_tasks'] = [t for t in tasks if t.get('title','') != title]
-        save_company(company)
-        update_company(cid, {'recurring_tasks': company['recurring_tasks']})
-        results.append(f"🗑️ '{title}' 정기 작업 삭제됨")
+        company = get_company(cid)
+        if company:
+            company['recurring_tasks'] = [t for t in company.get('recurring_tasks', []) if t.get('title','') != title]
+            update_company(cid, {'recurring_tasks': company['recurring_tasks']})
+            results.append(f"🗑️ '{title}' 정기 작업 삭제됨")
     
     if any('CRON' in r for r in results):
         print(f"[cron_cmds] {agent_id}: {'; '.join(results)}")
@@ -229,10 +216,10 @@ def process_task_commands(cid, text, agent_id):
     has_task_cmd = bool(re.search(r'\[TASK_', text))
     if not has_task_cmd:
         company = get_company(cid)
-        board_tasks = company.get('board_tasks', [])
+        if not company: return results
+        board_tasks = db_get_tasks(cid)
         agent = next((a for a in company.get('agents', []) if a['id'] == agent_id), None)
         
-        # "~작성하겠습니다", "~수립하겠습니다", "~구축하겠습니다" → 자동 칸반 추가
         start_patterns = re.findall(r'(?:작성|수립|구축|개발|제작|준비|기획|설계|구현|검토|분석|실행|진행|도입|설정)하?겠습니다[:\s]*([^\n.]{2,30})', text)
         for title in start_patterns:
             title = title.strip().rstrip('.,;')
@@ -240,24 +227,16 @@ def process_task_commands(cid, text, agent_id):
             if any(t.get('title','') == title for t in board_tasks): continue
             task = add_board_task(cid, title, agent_id, '진행중', [], '')
             if task:
-                board_tasks.append(task)
                 results.append(f"📋 '{title}' 자동 추가됨 (진행)")
         
-        # "~완료", "~완성", "~작성 완료" → 자동 완료 처리
         done_patterns = re.findall(r'(?:완료|완성|마무리|제출|완료했습니다|완성했습니다)\s*(?:하였습니다|했습니다)?[:\s]*([^\n.]{2,30})', text)
         for title in done_patterns:
             title = title.strip().rstrip('.,;')
             for t in board_tasks:
                 if title in t.get('title','') and t.get('status') != '완료':
-                    t['status'] = '완료'
+                    db_update_task(cid, t['id'], {'status': '완료', 'updated_at': datetime.now().isoformat()})
                     results.append(f"🎉 '{t['title']}' 완료 처리")
                     break
-        
-        if results:
-            company = get_company(cid)
-            company['board_tasks'] = board_tasks
-            save_company(company)
-            update_company(cid, {'board_tasks': company['board_tasks']})
     
     return results
 
@@ -1326,7 +1305,8 @@ def create_company(name, topic, lang="ko"):
 _AGENT_QUEUES = {}  # {"cid:agent_id": deque of texts}
 _AGENT_BUSY = set()
 _AGENT_STATE_LOCK = threading.Lock()
-_MENTION_COUNTS = {}  # {cid: {from_to: {'count': int, 'ts': float}}}
+from collections import deque
+_MENTION_COUNTS = {}  # {cid: {chain_key: {'count': int, 'ts': float}}}
 _MENTION_LIMIT = 5    # max mentions per chain
 _MENTION_TTL = 1800   # seconds
 _MAX_CONCURRENT = 2  # max agents thinking at once
@@ -1745,7 +1725,7 @@ def nudge_agent(cid, text, target):
                     update_company(cid, {"agents": c['agents']})
             except: pass
             if key in _AGENT_QUEUES and _AGENT_QUEUES[key]:
-                next_text = _AGENT_QUEUES[key].popleft()
+                next_text = _AGENT_QUEUES[key].pop(0)
                 if not _AGENT_QUEUES[key]:
                     del _AGENT_QUEUES[key]
                 threading.Thread(target=_process, args=(next_text,), daemon=True).start()
@@ -1757,22 +1737,12 @@ def nudge_agent(cid, text, target):
             dropped = _AGENT_QUEUES[key].pop(0)
             print(f"[nudge] {agent_id} queue full, dropped oldest: {dropped[:60]}")
             try:
-                company_now = get_company(cid)
-                if company_now:
-                    warn_msg = {
-                        "from": "시스템",
-                        "emoji": "⚠️",
-                        "text": f"{emoji} {agent_name} 대기열이 가득 차 가장 오래된 요청 1개를 제거했습니다.",
-                        "time": datetime.now().strftime('%H:%M'),
-                        "type": "system"
-                    }
-                    company_now.setdefault('chat', []).append(warn_msg)
-                    company_now.setdefault('activity_log', []).append({
-                        "time": warn_msg['time'],
-                        "agent": "시스템",
-                        "text": f"{agent_name} queue overflow: oldest request dropped"
-                    })
-                    update_company(cid, {"chat": company_now['chat'], "activity_log": company_now['activity_log']})
+                append_chat(cid, warn_msg, broadcast=True)
+                append_activity(cid, {
+                    "time": datetime.now().strftime('%H:%M'),
+                    "agent": "시스템",
+                    "text": f"{agent_name} queue overflow: oldest request dropped"
+                })
             except Exception as e:
                 print(f"[nudge] queue overflow notify failed: {e}")
         _AGENT_QUEUES[key].append(text)
