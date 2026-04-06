@@ -942,7 +942,7 @@ def _s(key, lang, **kwargs):
         "msg.no_reply": {"ko": "{emoji} {name}이(가) 응답하지 않았습니다. 다시 시도하거나 에이전트를 재활성화해주세요.", "en": "{emoji} {name} did not respond. Please try again or reactivate the agent."},
         "status.waiting": {"ko": "⏳ 에이전트를 준비하고 있습니다. 잠시만 기다려주세요...", "en": "⏳ Agents are being prepared. Please wait..."},
         "status.ready": {"ko": "✅ 에이전트가 모두 준비 완료되었습니다! 대화를 시작하시면 됩니다.", "en": "✅ All agents are ready! You can start the conversation now."},
-        "intervention.title": {"ko": "👤 사용자 개입 필요 ({from}): {snippet}", "en": "👤 User intervention needed ({from}): {snippet}"},
+        "intervention.title": {"ko": "👤 사용자 개입 필요 ({agent}): {snippet}", "en": "👤 User intervention needed ({agent}): {snippet}"},
         # Newspaper
         "news.team_status": {"ko": "## 팀원 상태", "en": "## Team Status"},
         "news.tasks": {"ko": "## 작업 현황", "en": "## Task Status"},
@@ -1650,7 +1650,7 @@ def _check_user_intervention(cid, text, from_agent):
     if not snippet:
         return
     create_approval(cid, 'user_intervention', from_agent,
-                      _s('intervention.title', get_company(cid).get('lang','ko') if get_company(cid) else 'ko', from=from_agent, snippet=snippet))
+                      _s('intervention.title', get_company(cid).get('lang','ko') if get_company(cid) else 'ko', agent=from_agent, snippet=snippet))
     print(f"[intervention] {cid}: user action needed from {from_agent}")
 
 class Handler(http.server.SimpleHTTPRequestHandler):
