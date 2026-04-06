@@ -2053,6 +2053,29 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # Detect user intervention needed (credentials, external accounts, etc)
         _check_user_intervention(cid, text, from_agent)
 
+        # Agent-to-agent mentions: nudge mentioned agents
+        if mention_text:
+            existing_ids = {a['id'].lower() for a in company.get('agents', [])}
+            for ml in mention_text.split('\n'):
+                ml = ml.strip()
+                if not ml: continue
+                for m in re.findall(r'@([A-Za-z0-9]+)', ml):
+                    if m.lower() in existing_ids and m.upper() != from_agent.upper():
+                        target = m.upper()
+                        instruction = re.sub(r'@[A-Za-z0-9]+\s*', '', ml).strip()
+                        if not instruction:
+                            # No block content, use full text as context
+                            instruction = text
+                        add_to_inbox(cid, target.lower(), from_agent, instruction, company.get('lang','ko'))
+                        task_title = extract_task_from_instruction(instruction) or instruction[:30]
+                        add_board_task(cid, task_title, target.lower(), '대기', [], '')
+                        refreshed = get_company(cid)
+                        if refreshed:
+                            update_company(cid, {'board_tasks': refreshed.get('board_tasks', [])})
+                        print(f"[agent-mention] {from_agent} → @{target}: {instruction[:60]}")
+                        threading.Thread(target=nudge_agent, args=(cid, instruction, target), daemon=True).start()
+                        break  # one nudge per line
+
         company_after_update = get_company(cid)
         if not company_after_update:
             print(f"[WARN] company missing after update: {cid}")
