@@ -1643,6 +1643,32 @@ def nudge_agent(cid, text, target):
                                         urllib.request.urlopen(req, timeout=5)
                                     except Exception as e:
                                         print(f"[nudge] followup post failed: {e}")
+
+                    # Non-CEO: if responded without @CEO mention, prompt to report
+                    if aid != 'ceo' and '@' not in clean:
+                        print(f"[nudge] {aid} responded without report, prompting @CEO...")
+                        time.sleep(2)
+                        report_prompt = f"{agent_name}, 작업 결과를 @CEO에게 보고하세요. @CEO 멘션을 포함해서 결과를 전달해야 CEO가 받을 수 있습니다."
+                        proc_r = subprocess.Popen(
+                            ['openclaw', 'agent', '--agent', agent_id,
+                             '--session-id', session_id, '--local', '-m', report_prompt],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        stdout_r, stderr_r = proc_r.communicate(timeout=120)
+                        reply_r = stdout_r.decode().strip()
+                        print(f"[nudge] {aid} report reply={len(reply_r)}chars")
+                        if reply_r:
+                            clean_r = '\n'.join(l for l in reply_r.split('\n')
+                                                if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
+                            if clean_r:
+                                for chunk in split_message(clean_r, max_chars=1500):
+                                    try:
+                                        payload = json.dumps({"from": agent_name, "emoji": emoji, "text": chunk}).encode()
+                                        req = urllib.request.Request(
+                                            f'http://localhost:3000/api/agent-msg/{cid}',
+                                            data=payload, headers={'Content-Type': 'application/json'})
+                                        urllib.request.urlopen(req, timeout=5)
+                                    except Exception as e:
+                                        print(f"[nudge] report post failed: {e}")
                                         
         except subprocess.TimeoutExpired:
             print(f"[nudge] {agent_id} timeout after {time.time()-nudge_start:.0f}s")
