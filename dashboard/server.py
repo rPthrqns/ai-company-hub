@@ -1277,7 +1277,7 @@ def create_company(name, topic, lang="ko"):
 # ─── Lightweight Agent Nudge (Empire-style) ───
 
 def nudge_agent(cid, text, target):
-    """Lightweight: write to queue and nudge agent to self-process."""
+    """Lightweight nudge: send message, parse stdout reply, save to chat. No locks."""
     company = get_company(cid)
     if not company:
         return
@@ -1286,6 +1286,7 @@ def nudge_agent(cid, text, target):
         agent = company['agents'][0]
     agent_id = agent.get('agent_id', f"{cid}-{agent['id']}")
     agent_name = agent.get('name', target)
+    emoji = agent.get('emoji', '👔')
 
     # Update status to working
     try:
@@ -1306,22 +1307,68 @@ def nudge_agent(cid, text, target):
             update_company(cid, {'board_tasks': company['board_tasks']})
             break
 
-    # Nudge: short message, agent reads queue and processes itself
-    nudge = f"큐에 새 메시지가 있습니다. 확인하고 응답하세요: {text[:200]}"
     session_id = f"{agent_id}-turn-{int(time.time())}"
+    nudge_start = time.time()
 
     def _run():
         try:
             proc = subprocess.Popen(
-                ['openclaw', 'agent', '--agent', agent_id, '--session-id', session_id, '--local', '-m', nudge],
+                ['openclaw', 'agent', '--agent', agent_id, '--session-id', session_id, '--local', '-m', text],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
-            stdout, stderr = proc.communicate(timeout=300)
-            print(f"[nudge] {agent_id} done rc={proc.returncode}")
+            stdout, stderr = proc.communicate(timeout=120)
+            elapsed = time.time() - nudge_start
+            reply_raw = stdout.decode().strip()
+            print(f"[nudge] {agent_id} reply={len(reply_raw)}chars rc={proc.returncode} time={elapsed:.1f}s")
+
+            if not reply_raw or 'No reply from agent' in reply_raw or proc.returncode != 0:
+                print(f"[nudge] {agent_id} no reply, retrying in 3s...")
+                time.sleep(3)
+                proc2 = subprocess.Popen(
+                    ['openclaw', 'agent', '--agent', agent_id, '--session-id', f"{session_id}-retry", '--local', '-m', text],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+                stdout2, stderr2 = proc2.communicate(timeout=120)
+                reply_raw = stdout2.decode().strip()
+                print(f"[nudge] {agent_id} retry reply={len(reply_raw)}chars rc={proc2.returncode}")
+
+            if reply_raw and 'No reply from agent' not in reply_raw:
+                lines = reply_raw.split('\n')
+                clean = '\n'.join(l for l in lines if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
+                if clean:
+                    # Save memory
+                    save_agent_memory(cid, agent['id'], clean)
+                    # Process task commands
+                    process_task_commands(cid, clean, agent['id'])
+                    # Estimate cost
+                    est_tokens = max(len(clean) // 4, 100)
+                    est_cost = round(est_tokens * COST_PER_1K_TOKENS / 1000, 6)
+                    update_agent_cost(cid, agent['id'], est_tokens, est_cost)
+                    # Auto-complete oldest doing task
+                    company = get_company(cid)
+                    if company:
+                        for t in company.get('board_tasks', []):
+                            if t.get('agent_id') == agent['id'] and t.get('status') == '진행중':
+                                t['status'] = '완료'
+                                t['updated_at'] = datetime.now().isoformat()
+                                save_company(company)
+                                update_company(cid, {'board_tasks': company['board_tasks']})
+                                break
+                    # Post to chat via internal API
+                    chunks = split_message(clean, max_chars=1500)
+                    for chunk in chunks:
+                        try:
+                            payload = json.dumps({"from": agent_name, "emoji": emoji, "text": chunk}).encode()
+                            req = urllib.request.Request(
+                                f'http://localhost:3000/api/agent-msg/{cid}',
+                                data=payload, headers={'Content-Type': 'application/json'}
+                            )
+                            urllib.request.urlopen(req, timeout=5)
+                            if len(chunks) > 1: time.sleep(1)
+                        except Exception as e:
+                            print(f"[nudge] post failed: {e}")
         except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate()
-            print(f"[nudge] {agent_id} timeout")
+            print(f"[nudge] {agent_id} timeout after {time.time()-nudge_start:.0f}s")
         except Exception as e:
             print(f"[nudge] {agent_id} error: {e}")
         finally:
