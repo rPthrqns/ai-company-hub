@@ -13,6 +13,14 @@ COMPANIES_FILE = DATA / "companies.json"
 SSE_CLIENTS = []
 SSE_LOCK = threading.Lock()
 AGENT_LOCK = threading.Lock()
+_COMPANY_LOCKS = {}
+_COMPANY_LOCKS_MUTEX = threading.Lock()
+
+def _get_company_lock(cid):
+    with _COMPANY_LOCKS_MUTEX:
+        if cid not in _COMPANY_LOCKS:
+            _COMPANY_LOCKS[cid] = threading.Lock()
+        return _COMPANY_LOCKS[cid]
 _running_task_threads = set()
 
 def _reset_stuck_agents():
@@ -433,34 +441,38 @@ def save_company(company):
     if not company or 'id' not in company:
         return None
     cid = company['id']
-    state_file = DATA / f"{cid}.json"
-    save_json(state_file, company)
-    companies = load_json(COMPANIES_FILE, [])
-    replaced = False
-    for i, c in enumerate(companies):
-        if c.get("id") == cid:
-            companies[i] = company
-            replaced = True
-            break
-    if not replaced:
-        companies.append(company)
-    save_json(COMPANIES_FILE, companies)
+    lock = _get_company_lock(cid)
+    with lock:
+        state_file = DATA / f"{cid}.json"
+        save_json(state_file, company)
+        companies = load_json(COMPANIES_FILE, [])
+        replaced = False
+        for i, c in enumerate(companies):
+            if c.get("id") == cid:
+                companies[i] = company
+                replaced = True
+                break
+        if not replaced:
+            companies.append(company)
+        save_json(COMPANIES_FILE, companies)
     sse_broadcast('company_update', {"id": cid, "company": company})
     return company
 
 def update_company(cid, updates):
-    state_file = DATA / f"{cid}.json"
-    company = get_company(cid)
-    if company:
-        company.update(updates)
-        save_json(state_file, company)
-        companies = load_json(COMPANIES_FILE)
-        for i, c in enumerate(companies):
-            if c["id"] == cid:
-                companies[i] = company
-                break
-        save_json(COMPANIES_FILE, companies)
-        sse_broadcast('company_update', {"id": cid, "company": company})
+    lock = _get_company_lock(cid)
+    with lock:
+        state_file = DATA / f"{cid}.json"
+        company = get_company(cid)
+        if company:
+            company.update(updates)
+            save_json(state_file, company)
+            companies = load_json(COMPANIES_FILE)
+            for i, c in enumerate(companies):
+                if c["id"] == cid:
+                    companies[i] = company
+                    break
+            save_json(COMPANIES_FILE, companies)
+    sse_broadcast('company_update', {"id": cid, "company": company})
     return company
 
 # ─── Goal System ───
@@ -1887,8 +1899,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         try:
             while True:
                 time.sleep(30)
-                wfile.write(b": keepalive\n\n")
-                wfile.flush()
+                try:
+                    wfile.write(b": keepalive\n\n")
+                    wfile.flush()
+                except:
+                    break
         except:
             with SSE_LOCK:
                 if wfile in SSE_CLIENTS:
