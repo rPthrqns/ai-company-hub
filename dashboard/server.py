@@ -2021,11 +2021,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if before: normal_parts.append(before)
                 if after and not re.match(r'@', after): normal_parts.append(after)
             if not mention_parts:
-                # 블록 없으면 한줄 멘션
+                # 블록 없으면 한줄 멘션 (with or without content)
                 for line in text.split('\n'):
-                    lm = re.match(r'@([A-Za-z0-9]+)\s+(.+)', line.strip())
-                    if lm and lm.group(1).upper() != from_agent.upper():
-                        mention_parts.append(line.strip())
+                    stripped = line.strip()
+                    lm = re.match(r'@([A-Za-z0-9]+)(?:\s+(.+))?', stripped)
+                    if lm and lm.group(1).upper() != from_agent.upper() and lm.group(1).lower() in existing_ids:
+                        mention_parts.append(stripped)
                     else:
                         normal_parts.append(line)
             normal_text = '\n'.join(normal_parts).strip()
