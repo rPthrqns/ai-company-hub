@@ -1680,8 +1680,9 @@ def nudge_agent(cid, text, target):
                         except Exception as e:
                             print(f"[nudge] post failed: {e}")
 
-                    # CEO acknowledgment detection: if no @mention and no action, nudge again
-                    if aid == 'ceo' and '@' not in clean and len(clean) < 200:
+                    # CEO acknowledgment detection: if no @agent mention (only @마스터 doesn't count), nudge again
+                    has_agent_mention = bool(re.search(r'@(CMO|CTO|CEO|CFO|COO)', clean, re.IGNORECASE))
+                    if aid == 'ceo' and not has_agent_mention and len(clean) < 300:
                         print(f"[nudge] CEO acknowledged without delegation, prompting for plan...")
                         time.sleep(2)
                         followup = f"{agent_name}, 당신은 방금 '{text[:50]}'에 대해 계획만 언급하고 팀원에게 지시하지 않았습니다. 지금 바로 구체적인 계획을 세우고 @CMO @CTO에 각자 해야 할 작업을 @멘션으로 지시하세요. COMPLEX 프로토콜을 따르세요."
