@@ -1997,13 +1997,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not text or text in ('No reply from agent.', ''): self._json({"ok": False, "reason": "empty/no_reply"}); return
 
         # @마스터 멘션 감지 → 승인 요청 자동 생성
-        master_mention = re.search(r'@마스터[
-]?(.*)', text, re.DOTALL)
+        master_mention = re.search(r'@마스터 ?(.*)', text, re.DOTALL)
         master_request = ''
         if master_mention:
             master_request = master_mention.group(1).strip()
-            text = re.sub(r'@마스터[
-]?', '', text).strip()
+            text = re.sub(r'@B9c8C2a4D130 ?', '', text).strip()
+            text = re.sub(r'@B9c8C2a4D130 ?', '', text).strip()
             # 승인 요청 생성
             approval_item = {
                 'id': str(uuid.uuid4())[:8],
