@@ -5,8 +5,8 @@ import json, os, re, http.server, socketserver, subprocess, threading, time, url
 from pathlib import Path
 from datetime import datetime
 from db import (init_db, migrate_from_json, db_get_company, db_save_company, db_update_company,
-               db_get_all_companies, db_delete_company, db_add_chat, db_add_activity,
-               db_get_approvals, db_update_approval, db_get_tasks, db_add_task, db_get_doc, db_save_doc, db_clear_doc_cache)
+               db_get_all_companies, db_delete_company, db_add_chat, db_add_chats, db_add_activity, db_add_activities,
+               db_add_approval, db_get_approvals, db_update_approval, db_get_tasks, db_add_task, db_get_doc, db_save_doc, db_clear_doc_cache)
 
 # ─── Constants ───
 PORT = 3000
@@ -398,6 +398,52 @@ def update_company(cid, updates):
         sse_broadcast('company_update', {"id": cid, "company": company})
     return company
 
+
+def append_chat(cid, msg, broadcast=True):
+    db_add_chat(cid, msg)
+    company = get_company(cid)
+    if company:
+        sse_broadcast('company_update', {"id": cid, "company": company})
+    if broadcast:
+        sse_broadcast('chat', {'msg': msg})
+    return company
+
+
+def append_chats(cid, messages, broadcast=True):
+    db_add_chats(cid, messages)
+    company = get_company(cid)
+    if company:
+        sse_broadcast('company_update', {"id": cid, "company": company})
+    if broadcast:
+        for msg in messages:
+            sse_broadcast('chat', {'msg': msg})
+    return company
+
+
+def append_activity(cid, entry):
+    db_add_activity(cid, entry)
+    company = get_company(cid)
+    if company:
+        sse_broadcast('company_update', {"id": cid, "company": company})
+    return company
+
+
+def append_activities(cid, entries):
+    db_add_activities(cid, entries)
+    company = get_company(cid)
+    if company:
+        sse_broadcast('company_update', {"id": cid, "company": company})
+    return company
+
+
+def append_approval(cid, approval):
+    db_add_approval(cid, approval)
+    company = get_company(cid)
+    if company:
+        sse_broadcast('company_update', {"id": cid, "company": company})
+        sse_broadcast('approval', {'approval': approval})
+    return company
+
 # ─── Goal System ───
 
 def get_goals(cid):
@@ -676,14 +722,10 @@ def create_approval(cid, approval_type, agent, detail):
         'time': datetime.now().isoformat(),
     }
     approvals.append(approval)
-    update_company(cid, {'approvals': approvals})
+    append_approval(cid, approval)
     # Log
     now_str = datetime.now().strftime('%H:%M')
-    company = get_company(cid)
-    company['activity_log'] = company.get('activity_log', []) + [
-        {"time": now_str, "agent": "시스템", "text": f"⚠️ 승인 요청: {detail}"}
-    ]
-    update_company(cid, {'activity_log': company['activity_log']})
+    append_activity(cid, {"time": now_str, "agent": "시스템", "text": f"⚠️ 승인 요청: {detail}"})
     return approval
 
 def has_pending_approval(cid, approval_type):
@@ -709,12 +751,11 @@ def resolve_approval(cid, approval_id, resolution):
     if approval:
         now_str = datetime.now().strftime('%H:%M')
         emoji = "✅" if resolution == "approved" else "❌"
-        company = get_company(cid)
-        company['activity_log'] = company.get('activity_log', []) + [
-            {"time": now_str, "agent": "시스템",
-             "text": f"{emoji} 승인 {('승인' if resolution == 'approved' else '거부')}: {approval.get('detail', '')}"}
-        ]
-        update_company(cid, {'activity_log': company['activity_log']})
+        append_activity(cid, {
+            "time": now_str,
+            "agent": "시스템",
+            "text": f"{emoji} 승인 {('승인' if resolution == 'approved' else '거부')}: {approval.get('detail', '')}"
+        })
         # If budget exceeded was approved, increase budget by 50%
         if resolution == 'approved' and approval.get('type') == 'budget_exceeded':
             old_budget = company.get('budget', DEFAULT_BUDGET)
@@ -1998,9 +2039,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not text: self._json({"error": "empty"}, 400); return
         now = datetime.now(); time_str = now.strftime('%H:%M')
         msg = {"from": "webhook", "emoji": "🔗", "text": text[:500], "time": time_str, "type": "user"}
-        company["chat"].append(msg)
-        update_company(cid, {"chat": company["chat"]})
-        sse_broadcast('chat', {'msg': msg})
+        append_chat(cid, msg, broadcast=True)
         # Forward to CEO
         threading.Thread(target=nudge_agent, args=(cid, f"[웹훅 수신] {text[:200]}", 'CEO'), daemon=True).start()
         self._json({"ok": True})
@@ -2045,16 +2084,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         msg = {"from": "마스터", "text": text, "time": time_str, "type": "user", "mention": is_mention_msg}
 
-        company["chat"].append(msg)
+        append_chat(cid, msg, broadcast=False)
         targets_str = ', '.join(f'@{t}' for t in targets)
-        company["activity_log"].append({"time": time_str, "agent": "마스터", "text": f"{targets_str} {instruction}" if is_mention_msg else text})
+        append_activity(cid, {"time": time_str, "agent": "마스터", "text": f"{targets_str} {instruction}" if is_mention_msg else text})
 
         queue_file = DATA / f"{cid}-queue.json"
         queue = load_json(queue_file, [])
         queue.append({"text": text, "time": now.isoformat(), "target": targets[0], "processed": False, "id": now.timestamp()})
         save_json(queue_file, queue)
 
-        update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
         self._json({"ok": True, "msg": msg, "target": targets[0] if targets else 'CEO'})
 
         # 멘션 메시지면 에이전트들에게 instruction 전달
@@ -2111,12 +2149,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 'time': time_str,
                 'created_at': datetime.now().isoformat()
             }
-            company['approvals'] = company.get('approvals', [])
-            company['approvals'].append(approval_item)
-            update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"], "approvals": company['approvals']})
             if not is_long:
-                sse_broadcast('chat', {'msg': chat_msg})
-                sse_broadcast('approval', {'approval': approval_item})
+                append_chat(cid, chat_msg, broadcast=True)
+            append_activity(cid, {"time": time_str, "agent": from_agent, "text": f"@마스터 {master_request[:50]}{'...' if len(master_request)>50 else ''}"})
+            append_approval(cid, approval_item)
             print(f"[master] {from_agent} → @마스터: {master_request[:60]}")
         
         # 에이전트 응답에서 멘션 부분과 일반 부분 분리
@@ -2170,7 +2206,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     response_msg = mention_msg
             company["activity_log"].append({"time": time_str, "agent": from_agent, "text": mention_text})
 
-        update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
+        if response_msg:
+            chat_messages = []
+            if normal_text:
+                chat_messages.append(response_msg if response_msg.get('text') == normal_text else {"from": from_agent, "emoji": emoji, "text": normal_text, "time": time_str, "type": "agent"})
+            if mention_text:
+                for ml in mention_text.split('\n'):
+                    ml = ml.strip()
+                    if ml:
+                        chat_messages.append({"from": from_agent, "emoji": emoji, "text": ml, "time": time_str, "type": "agent", "mention": True})
+            append_chats(cid, chat_messages, broadcast=False)
+        if normal_text:
+            append_activity(cid, {"time": time_str, "agent": from_agent, "text": normal_text})
+        if mention_text:
+            append_activity(cid, {"time": time_str, "agent": from_agent, "text": mention_text})
         self._json({"ok": True, "msg": response_msg})
 
         # Detect user intervention needed (credentials, external accounts, etc)

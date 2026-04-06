@@ -249,6 +249,26 @@ def db_add_chat(cid, msg):
             (cid, msg.get('from',''), msg.get('emoji',''), msg.get('text',''),
              msg.get('time',''), msg.get('type','user'),
              1 if msg.get('mention') else 0, msg.get('to',''), count))
+        if count >= 200:
+            conn.execute("DELETE FROM chat_messages WHERE company_id=? AND id NOT IN (SELECT id FROM chat_messages WHERE company_id=? ORDER BY id DESC LIMIT 200)", (cid, cid))
+        conn.commit()
+        conn.close()
+
+
+def db_add_chats(cid, messages):
+    if not messages:
+        return
+    with _lock:
+        conn = _conn()
+        count = conn.execute("SELECT COUNT(*) FROM chat_messages WHERE company_id=?", (cid,)).fetchone()[0]
+        for i, msg in enumerate(messages):
+            conn.execute("""INSERT INTO chat_messages
+                (company_id, from_field, emoji, text, time, msg_type, mention, to_field, sort_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (cid, msg.get('from',''), msg.get('emoji',''), msg.get('text',''),
+                 msg.get('time',''), msg.get('type','user'),
+                 1 if msg.get('mention') else 0, msg.get('to',''), count + i))
+        conn.execute("DELETE FROM chat_messages WHERE company_id=? AND id NOT IN (SELECT id FROM chat_messages WHERE company_id=? ORDER BY id DESC LIMIT 200)", (cid, cid))
         conn.commit()
         conn.close()
 
@@ -320,6 +340,20 @@ def db_update_approval(cid, aid, updates):
         conn.commit()
         conn.close()
 
+
+def db_add_approval(cid, approval):
+    with _lock:
+        conn = _conn()
+        conn.execute("""INSERT OR REPLACE INTO approvals
+            (id, company_id, from_agent, from_emoji, approval_type, detail, status, time, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (approval.get('id',''), cid, approval.get('from_agent', approval.get('agent','')),
+             approval.get('from_emoji',''), approval.get('type', approval.get('approval_type','요청')),
+             approval.get('detail',''), approval.get('status','pending'),
+             approval.get('time',''), approval.get('created_at','')))
+        conn.commit()
+        conn.close()
+
 def _save_approvals(conn, cid, approvals):
     conn.execute("DELETE FROM approvals WHERE company_id=?", (cid,))
     for a in approvals:
@@ -344,6 +378,20 @@ def db_add_activity(cid, entry):
         conn = _conn()
         conn.execute("INSERT INTO activity_log (company_id, agent, text, time) VALUES (?, ?, ?, ?)",
             (cid, entry.get('agent',''), entry.get('text',''), entry.get('time','')))
+        conn.execute("DELETE FROM activity_log WHERE company_id=? AND id NOT IN (SELECT id FROM activity_log WHERE company_id=? ORDER BY id DESC LIMIT 50)", (cid, cid))
+        conn.commit()
+        conn.close()
+
+
+def db_add_activities(cid, entries):
+    if not entries:
+        return
+    with _lock:
+        conn = _conn()
+        for entry in entries:
+            conn.execute("INSERT INTO activity_log (company_id, agent, text, time) VALUES (?, ?, ?, ?)",
+                (cid, entry.get('agent',''), entry.get('text',''), entry.get('time','')))
+        conn.execute("DELETE FROM activity_log WHERE company_id=? AND id NOT IN (SELECT id FROM activity_log WHERE company_id=? ORDER BY id DESC LIMIT 50)", (cid, cid))
         conn.commit()
         conn.close()
 
