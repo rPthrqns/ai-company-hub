@@ -4,7 +4,7 @@ import sqlite3, json, os, threading
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent / "data" / "hub.db"
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 def _conn():
     conn = sqlite3.connect(str(DB_PATH), timeout=10)
@@ -150,6 +150,10 @@ def db_delete_company(cid):
 def db_get_chat(cid):
     with _lock:
         conn = _conn()
+        # Keep last 200 messages, delete older ones
+        count = conn.execute("SELECT COUNT(*) FROM chat_messages WHERE company_id=?", (cid,)).fetchone()[0]
+        if count > 200:
+            conn.execute("DELETE FROM chat_messages WHERE company_id=? AND id NOT IN (SELECT id FROM chat_messages WHERE company_id=? ORDER BY id DESC LIMIT 200)", (cid, cid))
         rows = conn.execute("SELECT * FROM chat_messages WHERE company_id=? ORDER BY sort_order, id", (cid,)).fetchall()
         conn.close()
     return [{'from': r['from_field'], 'emoji': r['emoji'], 'text': r['text'],
@@ -265,9 +269,9 @@ def db_add_activity(cid, entry):
         conn.close()
 
 def _save_activity(conn, cid, entries):
-    conn.execute("DELETE FROM activity_log WHERE company_id=?", (cid,))
+    # Only save new entries, don't DELETE all
     for e in entries[-50:]:
-        conn.execute("INSERT INTO activity_log (company_id, agent, text, time) VALUES (?, ?, ?, ?)",
+        conn.execute("INSERT OR IGNORE INTO activity_log (company_id, agent, text, time) VALUES (?, ?, ?, ?)",
             (cid, e.get('agent',''), e.get('text',''), e.get('time','')))
 
 # ─── Migration ───

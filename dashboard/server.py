@@ -352,72 +352,34 @@ def gen_id(prefix="id"):
 # ─── Company Data Access ───
 
 def init_companies():
-    if not COMPANIES_FILE.exists():
-        save_json(COMPANIES_FILE, [])
-
-    recovered = []
-    seen_ids = set()
-
-    def _consider_company_data(data, source_name=None):
-        if not data or 'id' not in data:
-            return
-        cid = data.get('id')
-        if not cid or cid in seen_ids:
-            return
+    """Reset stuck agents on startup, using DB."""
+    companies = db_get_all_companies()
+    reset_count = 0
+    for comp in companies:
         changed = False
-        for a in data.get('agents', []):
+        for a in comp.get('agents', []):
             if a.get('status') == 'working':
                 a['status'] = 'active'
                 changed = True
-        state_file = DATA / f"{cid}.json"
-        if changed or not state_file.exists():
-            save_json(state_file, data)
-            if changed:
-                print(f"[reset] {cid}: stuck agents reset")
-            elif source_name:
-                print(f"[init] restored {cid} from {source_name}")
-        recovered.append(data)
-        seen_ids.add(cid)
-
-    # 1) 정상 json state 파일 복구
-    for f in sorted(DATA.glob('*.json')):
-        if f.name == 'companies.json' or '-queue' in f.stem:
-            continue
-        try:
-            _consider_company_data(load_json(f), f.name)
-        except:
-            pass
-
-    # 2) .bak state 파일 복구
-    for f in sorted(DATA.glob('*.json.bak')):
-        if f.name == 'companies.json.bak' or '-queue' in f.stem:
-            continue
-        try:
-            data = json.loads(f.read_text(encoding='utf-8'))
-            _consider_company_data(data, f.name)
-        except:
-            pass
-
-    # 3) companies.json.bak 에서 누락 회사 복구
-    companies_bak = DATA / 'companies.json.bak'
-    if companies_bak.exists():
-        try:
-            bak_list = json.loads(companies_bak.read_text(encoding='utf-8'))
-            for item in bak_list if isinstance(bak_list, list) else []:
-                _consider_company_data(item, companies_bak.name)
-        except:
-            pass
-
-    current = load_json(COMPANIES_FILE, [])
-    current_ids = {c.get('id') for c in current}
-    merged = list(current)
-    for company in recovered:
-        if company.get('id') not in current_ids:
-            merged.append(company)
-    if merged != current:
-        save_json(COMPANIES_FILE, merged)
-        print(f"[init] recovered {len(merged) - len(current)} companies into companies.json")
-    return load_json(COMPANIES_FILE, [])
+                reset_count += 1
+        if changed:
+            db_save_company(comp)
+            print(f"[reset] {comp['id']}: {reset_count} stuck agents reset")
+    # Also recover from old JSON state files if DB is empty
+    if not companies:
+        for f in sorted(DATA.glob('company-*.json')):
+            if '-queue' in f.stem: continue
+            try:
+                data = load_json(f)
+                if data and 'id' in data:
+                    for a in data.get('agents', []):
+                        if a.get('status') == 'working':
+                            a['status'] = 'active'
+                    db_save_company(data)
+                    print(f"[init] recovered {data['id']} from {f.name}")
+            except: pass
+    print(f"[init] {len(db_get_all_companies())} companies ready")
+    return db_get_all_companies()
 
 def get_company(cid):
     return db_get_company(cid)
@@ -1313,7 +1275,10 @@ def create_company(name, topic, lang="ko"):
 
 # Per-agent queue for ordered processing + dedup
 _AGENT_QUEUES = {}  # {"cid:agent_id": deque of texts}
-_AGENT_BUSY = set()   # {"cid:agent_id"} currently processing
+_AGENT_BUSY = set()
+_AGENT_STATE_LOCK = threading.Lock()
+_MENTION_COUNTS = {}  # {cid: {from_to: count}}
+_MENTION_LIMIT = 5    # max mentions per chain   # {"cid:agent_id"} currently processing
 
 def generate_newspaper(cid):
     """Generate a concise daily brief from current state."""
@@ -1502,9 +1467,10 @@ def nudge_agent(cid, text, target):
 
     def _process(msg):
         nonlocal session_id
-        if key in _AGENT_BUSY:
-            return
-        _AGENT_BUSY.add(key)
+        with _AGENT_STATE_LOCK:
+            if key in _AGENT_BUSY:
+                return
+            _AGENT_BUSY.add(key)
         # Rebuild context for this message
         company = get_company(cid)
         newspaper = generate_newspaper(cid)
@@ -1567,7 +1533,12 @@ def nudge_agent(cid, text, target):
                  '--session-id', session_id, '--local', '-m', prompt],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
-            stdout, stderr = proc.communicate(timeout=120)
+            try:
+                stdout, stderr = proc.communicate(timeout=120)
+            except subprocess.TimeoutExpired:
+                print(f"[nudge] {agent_id} main timeout, killing")
+                proc.kill(); proc.wait(timeout=5)
+                raise
             elapsed = time.time() - nudge_start
             reply_raw = stdout.decode().strip()
             print(f"[nudge] {agent_id} reply={len(reply_raw)}chars rc={proc.returncode} time={elapsed:.1f}s raw={reply_raw[:100]}")
@@ -1652,6 +1623,14 @@ def nudge_agent(cid, text, target):
 
                     # CEO acknowledgment detection: if no @agent mention (only @마스터 doesn't count), nudge again
                     has_agent_mention = bool(re.search(r'@(CMO|CTO|CEO|CFO|COO)', clean, re.IGNORECASE))
+                    # Rate limit mentions to prevent ping-pong loops
+                    if has_agent_mention:
+                        _mc = _MENTION_COUNTS.setdefault(cid, {})
+                        chain = f"{aid}->{','.join(re.findall(r'@(\w+)', clean, re.IGNORECASE))}"
+                        _mc[chain] = _mc.get(chain, 0) + 1
+                        if _mc[chain] > _MENTION_LIMIT:
+                            print(f"[nudge] mention rate limit hit: {chain} ({_mc[chain]})")
+                            has_agent_mention = False
                     if aid == 'ceo' and not has_agent_mention and len(clean) < 300:
                         print(f"[nudge] CEO acknowledged without delegation, prompting for plan...")
                         time.sleep(2)
@@ -1678,7 +1657,12 @@ def nudge_agent(cid, text, target):
                                         print(f"[nudge] followup post failed: {e}")
 
         except subprocess.TimeoutExpired:
-            print(f"[nudge] {agent_id} timeout after {time.time()-nudge_start:.0f}s")
+            print(f"[nudge] {agent_id} timeout after {time.time()-nudge_start:.0f}s, killing...")
+            try:
+                for p in [proc, proc2, proc3, proc_f]:
+                    try: p.kill(); p.wait(timeout=5)
+                    except: pass
+            except: pass
         except Exception as e:
             print(f"[nudge] {agent_id} error: {e}")
         finally:
@@ -2559,17 +2543,17 @@ restore_running_tasks()
 print(f"🚀 AI Company Hub: http://localhost:{PORT}", flush=True)
 
 def _watchdog():
-    """10초마다 에이전트 상태 체크, working이 오래 지속되면 active로 복원"""
+    """30초마다 에이전트 상태 체크, working이 오래 지속되면 active로 복원"""
     import time as _t
     working_since = {}
     last_refresh = 0
     while True:
-        _t.sleep(10)
+        _t.sleep(30)
         try:
-            companies = load_json(COMPANIES_FILE, [])
-            for c in companies:
-                cid = c['id']
-                for a in c.get('agents', []):
+            companies = db_get_all_companies()
+            for comp in companies:
+                cid = comp['id']
+                for a in comp.get('agents', []):
                     aid = a['id']
                     st = a.get('status', 'active')
                     key = f"{cid}:{aid}"
@@ -2578,21 +2562,18 @@ def _watchdog():
                             working_since[key] = _t.time()
                         elif _t.time() - working_since[key] > 60:
                             print(f"[watchdog] {aid} stuck {int(_t.time()-working_since[key])}s → active")
-                            comp = get_company(cid)
-                            if comp:
-                                for ag in comp.get('agents', []):
-                                    if ag['id'] == aid:
-                                        ag['status'] = 'active'
-                                save_company(comp)
-                                update_company(cid, {'agents': comp['agents']})
+                            for ag in comp.get('agents', []):
+                                if ag['id'] == aid:
+                                    ag['status'] = 'active'
+                            update_company(cid, {'agents': comp['agents']})
                             working_since.pop(key, None)
                     else:
                         working_since.pop(key, None)
-            # Periodically keep agent sessions alive (every 5 min)
-            if _t.time() - last_refresh > 300:
+            # Keep sessions alive (every 10 min, max 1 agent at a time)
+            if _t.time() - last_refresh > 600:
                 last_refresh = _t.time()
-                for c in load_json(COMPANIES_FILE, []):
-                    for a in c.get('agents', []):
+                for comp in db_get_all_companies():
+                    for a in comp.get('agents', []):
                         agent_id = a.get('agent_id', '')
                         if agent_id and a.get('status') == 'active':
                             try:
@@ -2601,6 +2582,7 @@ def _watchdog():
                                      '-m', 'ping'],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
                                 )
+                                _t.sleep(2)  # Stagger pings to avoid CPU spike
                             except: pass
         except Exception as e:
             print(f"[watchdog] error: {e}")

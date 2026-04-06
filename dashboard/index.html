@@ -688,7 +688,6 @@ function renderCosts(){
   const totalEl=document.getElementById('total-cost');
   if(!cachedCosts||!cachedCosts.agents){footer.style.display='none';return;}
   const total=cachedCosts.total_cost||0;
-  const total=cachedCosts.total_cost||0;
   const rev=parseFloat(localStorage.getItem('revenue-'+currentCompany)||'0');
   const profit=rev-total;
   if(total>0||rev>0){
@@ -697,7 +696,6 @@ function renderCosts(){
     document.getElementById('total-revenue').textContent=`$${rev.toFixed(2)}`;
     document.getElementById('total-profit').textContent=`$${profit.toFixed(2)}`;
     document.getElementById('total-profit').style.color=profit>=0?'#4ade80':'#f87171';
-  }
   }else{
     footer.style.display='none';
   }
@@ -761,7 +759,7 @@ async function resolveApproval(aprId,resolution){
     const data=await res.json();
     if(data.ok){
       toast(resolution==='approved'?'✅ 제출되었습니다':'❌ 반려되었습니다');
-      if(resolution==='approved'){const rev=parseFloat(localStorage.getItem('revenue-'+currentCompany)||'0')+Math.random()*5+1;localStorage.setItem('revenue-'+currentCompany,rev.toFixed(2));renderCostFooter();}
+      if(resolution==='approved'){const rev=parseFloat(localStorage.getItem('revenue-'+currentCompany)||'0')+Math.random()*5+1;localStorage.setItem('revenue-'+currentCompany,rev.toFixed(2));renderCosts();}
       cachedApprovals=cachedApprovals.filter(a=>a.id!==aprId);
       renderApprovals();
       // Refresh company data since approval might change things
