@@ -2140,22 +2140,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # 짧은 건 채팅에도 표시, 긴 건 결재만
             if not is_long:
                 chat_msg = {"from": from_agent, "emoji": emoji, "text": f"@마스터 {master_request}", "time": time_str, "type": "agent", "mention": True}
-                company["chat"].append(chat_msg)
-            company["activity_log"].append({"time": time_str, "agent": from_agent, "text": f"@마스터 {master_request[:50]}{'...' if len(master_request)>50 else ''}"})
+                append_chat(cid, chat_msg, broadcast=True)
+            append_activity(cid, {"time": time_str, "agent": from_agent, "text": f"@마스터 {master_request[:50]}{'...' if len(master_request)>50 else ''}"})
             # 결재 탭에 전체 내용 저장
             approval_item = {
                 'id': str(uuid.uuid4())[:8],
                 'from_agent': from_agent,
                 'from_emoji': emoji,
                 'type': '보고서' if is_long else '요청',
-                'detail': master_request,  # full content, no truncation
+                'detail': master_request,
                 'status': 'pending',
                 'time': time_str,
                 'created_at': datetime.now().isoformat()
             }
-            if not is_long:
-                append_chat(cid, chat_msg, broadcast=True)
-            append_activity(cid, {"time": time_str, "agent": from_agent, "text": f"@마스터 {master_request[:50]}{'...' if len(master_request)>50 else ''}"})
             append_approval(cid, approval_item)
             print(f"[master] {from_agent} → @마스터: {master_request[:60]}")
         
@@ -2195,8 +2192,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # 일반 텍스트가 있으면 채팅에 저장
         if normal_text:
             response_msg = {"from": from_agent, "emoji": emoji, "text": normal_text, "time": time_str, "type": "agent"}
-            company["chat"].append(response_msg)
-            company["activity_log"].append({"time": time_str, "agent": from_agent, "text": normal_text})
         
         # 멘션 텍스트가 있으면 별도 채팅에 저장 (from = 멘션 발신자, mention = true)
         if mention_text:
@@ -2204,16 +2199,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             for ml in mention_text.split('\n'):
                 ml = ml.strip()
                 if not ml: continue
-                mention_msg = {"from": from_agent, "emoji": emoji, "text": ml, "time": time_str, "type": "agent", "mention": True}
-                company["chat"].append(mention_msg)
                 if response_msg is None:
-                    response_msg = mention_msg
-            company["activity_log"].append({"time": time_str, "agent": from_agent, "text": mention_text})
+                    response_msg = {"from": from_agent, "emoji": emoji, "text": ml, "time": time_str, "type": "agent", "mention": True}
 
         if response_msg:
             chat_messages = []
             if normal_text:
-                chat_messages.append(response_msg if response_msg.get('text') == normal_text else {"from": from_agent, "emoji": emoji, "text": normal_text, "time": time_str, "type": "agent"})
+                chat_messages.append({"from": from_agent, "emoji": emoji, "text": normal_text, "time": time_str, "type": "agent"})
             if mention_text:
                 for ml in mention_text.split('\n'):
                     ml = ml.strip()
