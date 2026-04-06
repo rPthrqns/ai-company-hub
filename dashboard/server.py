@@ -958,7 +958,7 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji):
     if bootstrap.exists():
         bootstrap.unlink()
 
-def register_agent(agent_id, agent_workspace, name, role, company_name, emoji, wait=False, on_done=None):
+def register_agent(agent_id, agent_workspace, name, role, company_name, emoji, wait=False, on_done=None, company_id=None):
     """Register and activate an OpenClaw agent."""
     setup_agent_workspace(agent_workspace, name, role, company_name, emoji)
     if wait:
@@ -966,8 +966,15 @@ def register_agent(agent_id, agent_workspace, name, role, company_name, emoji, w
         if on_done: on_done()
     else:
         def _task():
-            _register_and_activate(agent_id, str(agent_workspace), name, role)
-            if on_done: on_done()
+            try:
+                _register_and_activate(agent_id, str(agent_workspace), name, role)
+            except Exception as e:
+                print(f"[register] {agent_id} failed: {e}")
+            if on_done:
+                try:
+                    on_done()
+                except Exception as e:
+                    print(f"[register] {agent_id} on_done callback error: {e}")
         threading.Thread(target=_task, daemon=True).start()
 
 def _register_and_activate(agent_id, workspace, name, role):
@@ -1415,12 +1422,7 @@ def trigger_processor(cid, text, target):
 공유 결과물 폴더: {company_workspace}/deliverables/
 워크스페이스: {agent_workspace}
 
-⚠️ 당신은 총괄입니다. 직접 작업을 수행하지 마세요.
-- 마스터가 일반 질문/요약/상황 확인을 하면, 우선 당신이 직접 간단히 답변하세요.
-- 팀원 위임이 꼭 필요한 경우에만 @멘션으로 작업을 분배하세요.
-- 이미 최근 대화/결과물/작업으로 답할 수 있으면 추가 위임하지 마세요.
-- 한 번의 응답에서 팀원 위임은 최대 1건만 하세요.
-- 단순 상태 보고에는 후속 작업을 자동 생성하지 마세요.
+⚠️ 당신은 총괄입니다. 직접 작업을 수행하지 마세요. 마스터의 요청을 받으면 반드시 @멘션으로 팀원에게 작업을 분배하세요. 형식: @CMO 구체적인 지시 내용 (한 줄에 하나씩)
 
 {COMPLEX_PROMPT}
 
@@ -1433,11 +1435,13 @@ def trigger_processor(cid, text, target):
 팀원: {available_agents}
 공유 결과물 폴더: {company_workspace}/deliverables/
 
-⚠️ 당신은 운영 비서입니다.
-- 요청받은 경우에만 현황을 정리해서 @CEO에게 보고하세요.
-- 능동적으로 연쇄 지시를 만들지 마세요.
-- 팀원 상태 확인이 꼭 필요할 때만 단일 @멘션 1건까지 허용됩니다.
-- 단순 요약/상태 보고에서는 새 작업을 만들지 마세요.
+⚠️ 당신은 운영 비서입니다. 다음을 관리하세요:
+1. 대기열 — 어느 작업이 대기/진행/완료인지 파악하고 정체된 작업을 CEO에게 보고하세요
+2. 결과물 — _shared/deliverables/에 파일이 정상적으로 업로드되었는지 확인하세요
+3. 정기작업 — 예정된 반복 작업이 정상 실행되는지 모니터하세요
+4. 진행률 — 전체 프로젝트 진행 상황을 요약해서 보고하세요
+
+@CEO에게 정기적으로 현황을 보고하세요. 팀원에게도 @멘션으로 상태 확인을 요청할 수 있습니다.
 
 {COMPLEX_PROMPT}
 
@@ -1451,9 +1455,7 @@ def trigger_processor(cid, text, target):
 공유 결과물 폴더: {company_workspace}/deliverables/
 워크스페이스: {agent_workspace}
 
-@CEO에게 보고하세요. 받은 지시에 대해 구체적으로 작업을 수행하고, 결과물을 _shared/deliverables/에 저장하세요.
-- 다른 팀원 @멘션은 정말 필요한 경우에만 1건 이내로 하세요.
-- 단순 보고/요약에서는 새 작업이나 연쇄 지시를 만들지 마세요.
+@CEO에게 보고하세요. 팀원에게도 @멘션으로 작업을 요청할 수 있습니다. 받은 지시에 대해 구체적으로 작업을 수행하고, 결과물을 _shared/deliverables/에 저장하세요.
 
 {COMPLEX_PROMPT}
 
@@ -1871,6 +1873,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif not is_mention_msg:
             # 일반 채팅 → CEO가 응답
             threading.Thread(target=trigger_processor, args=(cid, text, 'CEO'), daemon=True).start()
+            # COO도 현황 보고
+            coo_exists = any(a['id'] == 'coo' for a in company.get('agents', []))
+            if coo_exists:
+                threading.Thread(target=trigger_processor, args=(cid, f"현 상황을 2-3줄로 요약해서 @CEO에게 보고하세요: {text}", 'COO'), daemon=True).start()
 
     # ─── Agent Message Handler ───
     def _handle_agent_msg(self, path, body):
@@ -1888,23 +1894,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         now = datetime.now(); time_str = now.strftime('%H:%M')
         
         # 에이전트 응답에서 멘션 부분과 일반 부분 분리
-        has_mentions = bool(re.search(r'@(\w+)', text))
+        has_mentions = bool(re.search(r'@([A-Za-z0-9]+)', text))
         normal_text, mention_text = text, ''
         if has_mentions:
             normal_parts, mention_parts = [], []
-            block_re = re.compile(r'@(\w+)\s*```([\s\S]*?)```', re.MULTILINE)
-            remaining = text
+            block_re = re.compile(r'@([A-Za-z0-9]+)\s*```([\s\S]*?)```', re.MULTILINE)
+            existing_ids = {a['id'].lower() for a in company.get('agents', [])}
             # 블록 멘션 추출
             for bm in block_re.finditer(text):
+                m_name = bm.group(1)
                 before = text[:bm.start()].strip()
                 after = text[bm.end():].strip()
-                mention_parts.append(f"@{bm.group(1)} {bm.group(2).strip()}")
+                if m_name.lower() in existing_ids:
+                    mention_parts.append(f"@{bm.group(1)} {bm.group(2).strip()}")
+                else:
+                    # Not a known agent - treat as normal text
+                    mention_parts.append(text[bm.start():bm.end()].strip())
                 if before: normal_parts.append(before)
-                if after and not re.match(r'@\w+', after): normal_parts.append(after)
+                if after and not re.match(r'@', after): normal_parts.append(after)
             if not mention_parts:
                 # 블록 없으면 한줄 멘션
                 for line in text.split('\n'):
-                    lm = re.match(r'@(\w+)\s+(.+)', line.strip())
+                    lm = re.match(r'@([A-Za-z0-9]+)\s+(.+)', line.strip())
                     if lm and lm.group(1).upper() != from_agent.upper():
                         mention_parts.append(line.strip())
                     else:
@@ -1988,26 +1999,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def _handle_company_delete(self, body):
         cid = body.get('id')
         company = get_company(cid)
-        if company:
-            for agent in company.get('agents', []):
-                agent_id = agent.get('agent_id', '')
-                if agent_id:
-                    try:
-                        subprocess.run(['openclaw', 'agents', 'delete', agent_id, '--force'],
-                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
-                    except Exception as e:
-                        print(f"[WARN] agent delete failed {agent_id}: {e}")
-            import shutil
-            company_dir = DATA / cid
-            if company_dir.exists():
-                shutil.rmtree(company_dir, ignore_errors=True)
+        if not company: self._json({"ok": True}); return
+        for agent in company.get('agents', []):
+            agent_id = agent.get('agent_id', '')
+            if agent_id:
+                try:
+                    subprocess.run(['openclaw', 'agents', 'delete', agent_id, '--force'],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+                    print(f"[delete] agent {agent_id} removed")
+                except Exception as e:
+                    print(f"[WARN] agent delete failed {agent_id}: {e}")
+        import shutil
+        company_dir = DATA / cid
+        if company_dir.exists():
+            shutil.rmtree(company_dir, ignore_errors=True)
+        # Remove state files
+        for suffix in ['.json', '.json.bak', '-queue.json', '-queue.json.bak']:
+            f = DATA / f"{cid}{suffix}"
+            if f.exists(): f.unlink()
         companies = load_json(COMPANIES_FILE)
         companies = [c for c in companies if c["id"] != cid]
         save_json(COMPANIES_FILE, companies)
-        state_file = DATA / f"{cid}.json"
-        if state_file.exists(): state_file.unlink()
-        queue_file = DATA / f"{cid}-queue.json"
-        if queue_file.exists(): queue_file.unlink()
+        sse_broadcast('company_update', {"id": cid, "deleted": True})
         self._json({"ok": True})
 
     # ─── Agent Add Handler ───
@@ -2241,10 +2254,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # If agent addition was approved, actually add the agent
             if resolution == 'approved' and approval.get('type') == 'agent_add':
                 company = get_company(cid)
-                detail = approval.get('agent', '')
-                # Parse from detail (stored as agent name in 'agent' field)
-                # We'll need to re-trigger the add from UI
-                pass
+                if company:
+                    detail = approval.get('detail', '')
+                    # Extract name/role from detail text like "에이전트 추가 요청: 🤖 이름 (역할)"
+                    import re as _re
+                    m = _re.search(r'(\S+)\s*\(([^)]+)\)', detail)
+                    if m:
+                        add_name = m.group(1)
+                        add_role = m.group(2)
+                        # Find emoji from detail
+                        em = _re.search(r'([\U0001F300-\U0001F9FF])', detail)
+                        add_emoji = em.group(1) if em else '🤖'
+                        self._do_add_agent(cid, company, add_name, add_role, add_emoji, '')
+                    else:
+                        print(f"[approval] could not parse agent detail: {detail}")
             self._json({"ok": True, "approval": approval})
         else:
             self._json({"error": "not found"}, 404)
@@ -2256,8 +2279,14 @@ class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
 
 def ensure_agents_registered():
-    """On startup, re-register all agents from companies data and restore missing state files."""
+    """On startup, re-register all agents from companies data. Runs non-blocking."""
     companies = load_json(COMPANIES_FILE, [])
+    try:
+        result = subprocess.run(['openclaw', 'agents', 'list'], capture_output=True, text=True, timeout=20)
+        registered_output = result.stdout or ''
+    except Exception as e:
+        print(f"[INIT] agents list failed: {e}")
+        registered_output = ''
     for company in companies:
         cid = company['id']
         state_file = DATA / f"{cid}.json"
@@ -2267,22 +2296,31 @@ def ensure_agents_registered():
             agent_id = agent.get('agent_id', '')
             if not agent_id:
                 continue
-            result = subprocess.run(['openclaw', 'agents', 'list'], capture_output=True, text=True, timeout=10)
-            if agent_id not in result.stdout:
+            if agent_id not in registered_output:
                 print(f"[INIT] Re-registering {agent_id}...")
                 ws = DATA / cid / "workspaces" / agent['id']
-                bootstrap = ws / "BOOTSTRAP.md"
-                if bootstrap.exists():
-                    bootstrap.unlink()
+                def make_done(cid_val, aid_val):
+                    def _done():
+                        c = get_company(cid_val)
+                        if c:
+                            for a in c.get('agents', []):
+                                if a['id'] == aid_val:
+                                    a['status'] = 'active'
+                                    break
+                            save_company(c)
+                            print(f"[INIT] {aid_val} registered and active")
+                    return _done
                 register_agent(agent_id, ws, agent['name'], agent['role'],
-                               company.get('name', ''), agent.get('emoji', '🤖'), wait=True)
+                               company.get('name', ''), agent.get('emoji', '🤖'),
+                               wait=False, on_done=make_done(cid, agent['id']), company_id=cid)
+            elif agent.get('status') in ('registering', 'working'):
                 agent['status'] = 'active'
-        save_company(company)
+                save_company(company)
 
 init_companies()
-ensure_agents_registered()
+threading.Thread(target=ensure_agents_registered, daemon=True).start()
 restore_running_tasks()
-print(f"🚀 AI Company Hub: http://localhost:{PORT}")
+print(f"🚀 AI Company Hub: http://localhost:{PORT}", flush=True)
 
 def _watchdog():
     """10초마다 에이전트 상태 체크, working이 오래 지속되면 active로 복원"""
