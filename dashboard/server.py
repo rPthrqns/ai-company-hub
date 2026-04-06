@@ -2006,17 +2006,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if master_mention:
             master_request = master_mention.group(1).strip()
             text = re.sub(r'@\uB9C8\uC2A4\uD130 ?', '', text).strip()
-            # 채팅에 @마스터 메시지 표시
-            chat_msg = {"from": from_agent, "emoji": emoji, "text": f"@마스터 {master_request}", "time": time_str, "type": "agent", "mention": True}
-            company["chat"].append(chat_msg)
-            company["activity_log"].append({"time": time_str, "agent": from_agent, "text": f"@마스터 {master_request[:50]}"})
-            # 승인 탭에도 추가
+            is_long = len(master_request) > 100 or master_request.count('\n') >= 2
+            # 짧은 건 채팅에도 표시, 긴 건 결재만
+            if not is_long:
+                chat_msg = {"from": from_agent, "emoji": emoji, "text": f"@마스터 {master_request}", "time": time_str, "type": "agent", "mention": True}
+                company["chat"].append(chat_msg)
+            company["activity_log"].append({"time": time_str, "agent": from_agent, "text": f"@마스터 {master_request[:50]}{'...' if len(master_request)>50 else ''}"})
+            # 결재 탭에 전체 내용 저장
             approval_item = {
                 'id': str(uuid.uuid4())[:8],
                 'from_agent': from_agent,
                 'from_emoji': emoji,
-                'type': '보고/요청',
-                'detail': master_request[:200] if master_request else '보고/요청',
+                'type': '보고서' if is_long else '요청',
+                'detail': master_request,  # full content, no truncation
                 'status': 'pending',
                 'time': time_str,
                 'created_at': datetime.now().isoformat()
@@ -2024,7 +2026,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             company['approvals'] = company.get('approvals', [])
             company['approvals'].append(approval_item)
             update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"], "approvals": company['approvals']})
-            _sse_send(json.dumps({'type':'chat','msg':chat_msg}))
+            if not is_long:
+                _sse_send(json.dumps({'type':'chat','msg':chat_msg}))
             _sse_send(json.dumps({'type':'approval','approval':approval_item}))
             print(f"[master] {from_agent} → @마스터: {master_request[:60]}")
         
