@@ -1518,6 +1518,7 @@ def nudge_agent(cid, text, target):
                     save_agent_memory(cid, aid, clean)
                     process_task_commands(cid, clean, aid)
                     archive_inbox(cid, aid)
+                    _check_user_intervention(cid, clean, agent_name)
                     est_tokens = max(len(clean) // 4, 100)
                     est_cost = round(est_tokens * COST_PER_1K_TOKENS / 1000, 6)
                     update_agent_cost(cid, aid, est_tokens, est_cost)

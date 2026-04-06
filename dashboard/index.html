@@ -147,7 +147,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .right-tab:hover{color:var(--text)}
 .right-tab.active{background:var(--accent);color:white}
 .right-panel-content{flex:1;overflow:hidden;display:flex;flex-direction:column}
-.right-panel-content .tab-pane{display:none;flex:1;overflow:hidden;flex-direction:column}
+.right-panel-content .tab-pane{display:none;flex:1;overflow-y:auto;overflow-x:hidden;flex-direction:column}
 .right-panel-content .tab-pane.active{display:flex}
 
 .log-item{display:flex;gap:6px;padding:5px 0;border-bottom:1px solid #1a1a2e;font-size:10px;animation:fadeIn .2s}
@@ -262,9 +262,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   <div class="panel">
     <div class="right-tabs">
       <button class="right-tab" onclick="switchRightTab('kanban')">📋 대기열</button>
-    <button class="right-tab active" onclick="switchRightTab('approvals')">🔔 승인</button>
+    <button class="right-tab" onclick="switchRightTab('approvals')">🔔 승인</button>
     <button class="right-tab" onclick="switchRightTab('history')">📜 연혁</button>
-    <button class="right-tab" onclick="switchRightTab('recurring')">🔄 정기</button>
     <button class="right-tab" onclick="switchRightTab('deliverables')">📂 결과물</button>
     </div>
     <div class="right-panel-content">
@@ -279,14 +278,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
       </div>
       <!-- History Tab -->
       <div class="tab-pane" id="tab-history">
-        <div id="history-panel"><div style="padding:20px;color:var(--dim);font-size:11px;text-align:center">📜 아직 연혁이 없습니다<br><span style="font-size:10px">COO가 정기적으로 작성합니다</span></div></div>
-      </div>
-      <div class="tab-pane" id="tab-recurring">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div class="panel-title" style="margin:0;font-size:11px">🔄 정기 작업</div>
-          <button class="add-agent-btn" onclick="openTaskModal()" title="새 작업 추가" style="width:20px;height:20px;font-size:13px">＋</button>
-        </div>
-        <div id="task-list" style="overflow-y:auto;flex:1"></div>
+        <div id="history-panel"><div style="padding:20px;color:var(--dim);font-size:11px;text-align:center">📜 아직 연혁이 없습니다</div></div>
       </div>
       <!-- Deliverables Tab -->
       <div class="tab-pane" id="tab-deliverables">
@@ -766,7 +758,7 @@ function updateMainHeight(){
 // ─── Right panel tab switch ───
 function switchRightTab(tab){
   currentRightTab=tab;
-  const labelMap={kanban:'대기열',approvals:'승인',history:'연혁',recurring:'정기',deliverables:'결과물'};
+  const labelMap={kanban:'대기열',approvals:'승인',history:'연혁',deliverables:'결과물'};
   const target=labelMap[tab]||'';
   document.querySelectorAll('.right-tab').forEach(el=>{
     el.classList.toggle('active',el.textContent.includes(target));
@@ -774,7 +766,6 @@ function switchRightTab(tab){
   document.getElementById('tab-kanban').classList.toggle('active',tab==='kanban');
   document.getElementById('tab-approvals').classList.toggle('active',tab==='approvals');
   document.getElementById('tab-history').classList.toggle('active',tab==='history');
-  document.getElementById('tab-recurring').classList.toggle('active',tab==='recurring');
   document.getElementById('tab-deliverables').classList.toggle('active',tab==='deliverables');
 }
 
@@ -797,7 +788,7 @@ function mdToHtml(text){
   return h;
 }
 
-const MAX_VISIBLE_MESSAGES=100;
+const MAX_VISIBLE_MESSAGES=50;
 
 function appendChat(m){
   const el=document.getElementById('chat-messages'),isUser=m.type==='user',isSystem=m.type==='system';
