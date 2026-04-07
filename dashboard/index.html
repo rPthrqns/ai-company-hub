@@ -321,6 +321,20 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
       </div>
       <!-- History Tab -->
       <div class="tab-pane" id="tab-history">
+        <!-- Timeline Replay Slider -->
+        <div id="timeline-bar" style="display:none;padding:6px 8px;border-bottom:1px solid var(--border);flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+            <span style="font-size:10px;color:var(--dim)">⏮ 타임라인 리플레이</span>
+            <button onclick="exitTimeline()" style="margin-left:auto;background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px">✕ 종료</button>
+          </div>
+          <input type="range" id="timeline-slider" min="0" max="100" value="100" style="width:100%;accent-color:var(--accent)" oninput="_onTimelineSlide(this.value)">
+          <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--dim)">
+            <span id="tl-start">—</span><span id="tl-current">현재</span><span id="tl-end">현재</span>
+          </div>
+        </div>
+        <div style="padding:4px 8px;display:flex;justify-content:flex-end">
+          <button onclick="enterTimeline()" style="background:none;border:1px solid #334155;border-radius:5px;color:var(--dim);font-size:10px;padding:3px 8px;cursor:pointer">⏮ 리플레이 모드</button>
+        </div>
         <div id="history-panel"><div style="padding:20px;color:var(--dim);font-size:11px;text-align:center">📜 아직 연혁이 없습니다</div></div>
       </div>
       <div class="tab-pane" id="tab-recurring">
@@ -1349,6 +1363,53 @@ function renderHistory(){
   });
   html+='</div>';
   panel.innerHTML=html;
+}
+
+// ─── Timeline Replay ───
+let _timelineMode=false;
+let _allChatTimes=[];
+function enterTimeline(){
+  if(!currentCompany)return;
+  const c=companies.find(x=>x.id===currentCompany);
+  if(!c||!(c.chat||[]).length){toast('채팅 기록이 없습니다');return;}
+  _timelineMode=true;
+  // Collect sorted timestamps
+  _allChatTimes=(c.chat||[]).map((m,i)=>({idx:i,time:m.time||''}))
+    .filter(x=>x.time).sort((a,b)=>a.time.localeCompare(b.time));
+  const bar=document.getElementById('timeline-bar');
+  bar.style.display='block';
+  const slider=document.getElementById('timeline-slider');
+  slider.max=_allChatTimes.length-1;
+  slider.value=_allChatTimes.length-1;
+  if(_allChatTimes.length){
+    const fmt=t=>new Date(t).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    document.getElementById('tl-start').textContent=fmt(_allChatTimes[0].time);
+    document.getElementById('tl-end').textContent=fmt(_allChatTimes[_allChatTimes.length-1].time);
+  }
+  _onTimelineSlide(slider.value);
+}
+function exitTimeline(){
+  _timelineMode=false;
+  document.getElementById('timeline-bar').style.display='none';
+  // Restore full chat
+  const c=companies.find(x=>x.id===currentCompany);
+  if(c)_renderTimelineChat(c.chat||[]);
+}
+function _onTimelineSlide(val){
+  const c=companies.find(x=>x.id===currentCompany);
+  if(!c||!_allChatTimes.length)return;
+  const idx=parseInt(val);
+  const cutoff=_allChatTimes[idx]?.time||'';
+  const label=cutoff?new Date(cutoff).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'현재';
+  document.getElementById('tl-current').textContent=label;
+  const filtered=(c.chat||[]).filter(m=>!m.time||m.time<=cutoff);
+  _renderTimelineChat(filtered);
+}
+function _renderTimelineChat(msgs){
+  const chatEl=document.getElementById('chat-messages');
+  chatEl.innerHTML='';
+  msgs.forEach(m=>appendChat(m));
+  chatEl.scrollTop=chatEl.scrollHeight;
 }
 
 let sseReconnectTimer=null;
