@@ -9,58 +9,62 @@ class OpenClawRuntime(AgentRuntime):
 
     def run(self, agent_id: str, session_id: str, prompt: str,
             timeout: int = 120) -> str:
-        """Run openclaw and poll session JSONL for assistant response.
-        openclaw --local doesn't output to stdout in subprocess and process hangs,
-        so we monitor all JSONL files in sessions/ for new assistant messages."""
+        """Run openclaw and poll session JSONL for new assistant response.
+        Detects new responses by checking mtime changes and reading last assistant entry."""
         import json as _json
         sessions_dir = Path.home() / '.openclaw' / 'agents' / agent_id / 'sessions'
-        # Snapshot: record current last assistant message across all JSONL files
-        def _get_last_assistant():
-            if not sessions_dir.exists():
-                return None, 0
-            for f in sorted(sessions_dir.glob('*.jsonl'), key=lambda x: x.stat().st_mtime, reverse=True):
-                try:
-                    lines = f.read_text(errors='replace').strip().split('\n')
-                    for line in reversed(lines):
-                        entry = _json.loads(line)
-                        if entry.get('type') == 'message':
-                            msg = entry.get('message', {})
-                            if msg.get('role') == 'assistant':
-                                return entry.get('id'), len(lines)
-                except Exception:
-                    pass
-            return None, 0
-        pre_id, _ = _get_last_assistant()
-        # Launch openclaw (stdout goes nowhere — we read from JSONL)
+        # Record launch timestamp
+        launch_ts = time.time()
+        # Launch openclaw
         proc = subprocess.Popen(
             ['openclaw', 'agent', '--agent', agent_id,
              '--session-id', session_id, '--local', '-m', prompt],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # Poll for new assistant message
+        # Poll: check for JSONL files modified AFTER launch
         start = time.time()
         result = ''
+        last_check_size = 0
         while time.time() - start < timeout:
-            time.sleep(2)
+            time.sleep(3)
+            if not sessions_dir.exists():
+                continue
             for f in sorted(sessions_dir.glob('*.jsonl'), key=lambda x: x.stat().st_mtime, reverse=True):
+                try:
+                    st = f.stat()
+                    # Only check files modified after launch
+                    if st.st_mtime < launch_ts - 1:
+                        continue
+                    # Only check if file grew since last check
+                    if st.st_size == last_check_size:
+                        continue
+                    last_check_size = st.st_size
+                except OSError:
+                    continue
+                # Read entire file, find LAST assistant message with real content
                 try:
                     lines = f.read_text(errors='replace').strip().split('\n')
                     for line in reversed(lines):
-                        entry = _json.loads(line)
-                        if entry.get('type') == 'message':
-                            msg = entry.get('message', {})
-                            if msg.get('role') == 'assistant' and entry.get('id') != pre_id:
-                                contents = msg.get('content', [])
-                                texts = [c.get('text', '') for c in contents if c.get('type') == 'text']
-                                if texts:
-                                    result = '\n'.join(texts).strip()
-                                    break
+                        if not line.strip():
+                            continue
+                        try:
+                            entry = _json.loads(line)
+                            if entry.get('type') == 'message':
+                                msg = entry.get('message', {})
+                                if msg.get('role') == 'assistant':
+                                    texts = [c.get('text', '') for c in msg.get('content', []) if c.get('type') == 'text']
+                                    candidate = '\n'.join(texts).strip() if texts else ''
+                                    if candidate and candidate != 'NO_REPLY' and len(candidate) > 5:
+                                        result = candidate
+                                        break
+                        except _json.JSONDecodeError:
+                            pass
                 except Exception:
                     pass
                 if result:
                     break
             if result:
                 break
-        # Kill process
+        # Kill process (it hangs after responding)
         try:
             proc.kill()
         except Exception:
@@ -69,6 +73,13 @@ class OpenClawRuntime(AgentRuntime):
             proc.wait(timeout=5)
         except Exception:
             pass
+        # Clean up any lock files left behind
+        if sessions_dir.exists():
+            for lf in sessions_dir.glob('*.lock'):
+                try:
+                    lf.unlink()
+                except Exception:
+                    pass
         if not result:
             raise subprocess.TimeoutExpired(['openclaw', 'agent'], timeout)
         return result

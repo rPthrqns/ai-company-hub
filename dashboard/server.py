@@ -1784,8 +1784,9 @@ def nudge_agent(cid, text, target):
                 f"- [{t.get('agent_id','')}] {t.get('title','')} ({t.get('interval','')}분마다)"
                 for t in recurring[:5]))
         ctx = '\n\n'.join(ctx_parts)
-        report_note = '\n\n⚠️ 작업 완료 후 반드시 결과를 @CEO에게 보고하세요. @CEO 멘션을 포함하세요.' if aid != 'ceo' else '\n\n⚠️ 팀원 결과를 취합한 후 @마스터에게 최종 보고하세요. @마스터 멘션을 포함하세요.'
-        prompt = f"{ctx}\n\n메시지: {msg}{report_note}" if ctx else msg
+        report_note = '\n\n⚠️ 작업 완료 후 반드시 결과를 @CEO에게 보고하세요.' if aid != 'ceo' else '\n\n⚠️ 팀원들에게 @CMO @CTO 멘션으로 구체적 업무를 지시하세요.'
+        must_reply = '\n\n🔴 중요: 반드시 한국어로 구체적인 내용을 응답하세요. NO_REPLY 금지. 할 일이 없으면 현재 상황을 보고하세요.'
+        prompt = f"{ctx}\n\n마스터의 지시: {msg}{report_note}{must_reply}" if ctx else f"마스터의 지시: {msg}{report_note}{must_reply}"
 
         nudge_start = time.time()
         try:
@@ -3998,8 +3999,7 @@ def ensure_agents_registered():
                             a['status'] = 'active'
                             break
                     update_company(cid, {'agents': c['agents']})
-    # Warm up all agent sessions (activate CMO/CTO/etc.)
-    _warmup_all_sessions(companies)
+    # Warmup disabled — sessions activate on first real request to avoid lock conflicts
 
 def _warmup_all_sessions(companies):
     """Activate sessions for all registered agents (not just CEO)."""
