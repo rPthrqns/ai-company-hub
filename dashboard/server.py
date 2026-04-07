@@ -1089,6 +1089,40 @@ def get_recurring_tasks(cid):
     company = get_company(cid)
     return company.get('recurring_tasks', []) if company else []
 
+def run_meeting(cid, topic, agent_ids):
+    """Start a meeting: nudge each agent with the meeting topic simultaneously.
+    Each agent is prompted to share their perspective and collaborate via @mentions."""
+    company = get_company(cid)
+    if not company:
+        return
+    agents = [a for a in company.get('agents', []) if a['id'] in [x.lower() for x in agent_ids]]
+    if not agents:
+        agents = company.get('agents', [])[:3]  # Default: first 3 agents
+
+    now_str = datetime.now().strftime('%H:%M')
+    meeting_id = f"meeting-{int(time.time())}"
+    # Announce meeting in chat
+    announce = f"🏛️ 회의 시작: {topic}\n참석자: {', '.join(a['emoji']+' '+a['name'] for a in agents)}"
+    append_chat(cid, {"from": "시스템", "emoji": "🏛️", "text": announce,
+                       "time": datetime.now().isoformat(), "type": "system"}, broadcast=True)
+    append_activity(cid, {"time": now_str, "agent": "시스템",
+                           "text": f"🏛️ 회의 시작: {topic} (참석자 {len(agents)}명)"})
+
+    meeting_prompt_base = (
+        f"📋 [회의] 주제: {topic}\n\n"
+        f"이 회의에 참석 중인 다른 팀원: {', '.join('@'+a['name'] for a in agents)}\n\n"
+        "당신의 전문 분야 관점에서 이 주제에 대한 의견, 계획, 우려사항을 공유하세요. "
+        "필요하면 @멘션으로 다른 팀원과 협력하세요."
+    )
+    # Nudge all participants (the queue system handles concurrency)
+    for a in agents:
+        threading.Thread(
+            target=nudge_agent,
+            args=(cid, meeting_prompt_base, a['id'].upper()),
+            daemon=True
+        ).start()
+        time.sleep(0.5)  # Small stagger to avoid race on status updates
+
 def update_task_status(cid, task_id, new_status):
     company = get_company(cid)
     if not company:
@@ -2019,6 +2053,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif path.startswith('/api/webhook/'):
             self._handle_webhook(path, body)
 
+        elif path.startswith('/api/meeting/'):
+            self._handle_meeting(path, body)
+
+        elif path.startswith('/api/daily-report/'):
+            self._handle_daily_report(path, body)
+
         else:
             self._json({"error": "not found"}, 404)
 
@@ -2040,6 +2080,40 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # Forward to CEO
         threading.Thread(target=nudge_agent, args=(cid, f"[웹훅 수신] {text[:200]}", 'CEO'), daemon=True).start()
         self._json({"ok": True})
+
+    # ─── Meeting Handler ───
+    def _handle_meeting(self, path, body):
+        cid = path.split('/')[-1]
+        company = get_company(cid)
+        if not company: self._json({"error": "not found"}, 404); return
+        topic = body.get('topic', '').strip()
+        if not topic: self._json({"error": "topic required"}, 400); return
+        agent_ids = body.get('agents', [a['id'] for a in company.get('agents', [])[:4]])
+        threading.Thread(target=run_meeting, args=(cid, topic, agent_ids), daemon=True).start()
+        self._json({"ok": True, "topic": topic, "participants": len(agent_ids)})
+
+    # ─── Daily Report Handler ───
+    def _handle_daily_report(self, path, body):
+        cid = path.split('/')[-1]
+        company = get_company(cid)
+        if not company: self._json({"error": "not found"}, 404); return
+        agents = company.get('agents', [])
+        ceo = next((a for a in agents if a['id'] == 'ceo'), agents[0] if agents else None)
+        if not ceo: self._json({"error": "no agents"}, 400); return
+        task = add_recurring_task(
+            cid,
+            title='📊 데일리 리포트',
+            prompt=(
+                "오늘 하루 팀 전체의 업무 성과를 정리하여 데일리 리포트를 작성하세요.\n"
+                "포함 사항: ✅ 완료된 작업, ⏳ 진행 중인 작업, ⚠️ 이슈/블로커, 내일 계획.\n"
+                "결과를 @마스터에게 보고하세요."
+            ),
+            interval_minutes=1440,  # 1 day
+            agent_id=ceo['id'],
+            agent_name=ceo['name'],
+            agent_emoji=ceo.get('emoji', '👔')
+        )
+        self._json({"ok": True, "task": task})
 
     # ─── Chat Handler ───
     def _handle_chat(self, path, body):

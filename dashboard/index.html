@@ -244,6 +244,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
       <button class="add-agent-btn" onclick="openAgentModal()" title="에이전트 추가">＋</button>
     </div>
     <div id="org-list" style="overflow-y:auto;flex:1"></div>
+    <div style="display:flex;gap:4px;margin-top:6px;flex-shrink:0">
+      <button onclick="openMeetingModal()" style="flex:1;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:6px;padding:5px 4px;font-size:10px;cursor:pointer" title="회의 시작">🏛️ 회의</button>
+      <button onclick="startDailyReport()" style="flex:1;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:6px;padding:5px 4px;font-size:10px;cursor:pointer" title="데일리 리포트 설정">📊 데일리</button>
+    </div>
     <div class="cost-footer" id="cost-footer" style="display:none">
       <span>💰 비용</span>
       <span class="cost-total" id="total-cost" style="color:#f87171">$0.00</span>
@@ -391,6 +395,21 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeTaskModal()">취소</button>
       <button class="modal-submit" id="btn-task" onclick="addTask()"><span>생성</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Meeting Modal -->
+<div class="modal-overlay" id="meeting-modal">
+  <div class="modal">
+    <h2>🏛️ 회의 시작</h2>
+    <label>회의 주제</label>
+    <input id="m-topic" placeholder="예: Q2 마케팅 전략 수립" />
+    <label>참석자 선택</label>
+    <div id="m-agents" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeMeetingModal()">취소</button>
+      <button class="modal-submit" onclick="startMeeting()">🏛️ 회의 시작</button>
     </div>
   </div>
 </div>
@@ -1078,6 +1097,41 @@ function openTaskModal(){
   document.getElementById('task-modal').classList.add('show');
 }
 function closeTaskModal(){document.getElementById('task-modal').classList.remove('show')}
+
+function openMeetingModal(){
+  if(!currentCompany)return;
+  const c=companies.find(x=>x.id===currentCompany);
+  if(!c)return;
+  const agentsDiv=document.getElementById('m-agents');
+  agentsDiv.innerHTML=(c.agents||[]).map(a=>
+    `<label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer;background:var(--card);border:1px solid #374151;border-radius:6px;padding:4px 8px"><input type="checkbox" value="${a.id}" checked style="accent-color:var(--accent)">${a.emoji} ${a.name}</label>`
+  ).join('');
+  document.getElementById('m-topic').value='';
+  document.getElementById('meeting-modal').classList.add('show');
+}
+function closeMeetingModal(){document.getElementById('meeting-modal').classList.remove('show')}
+async function startMeeting(){
+  const topic=document.getElementById('m-topic').value.trim();
+  if(!topic){toast('회의 주제를 입력하세요');return;}
+  const checked=[...document.querySelectorAll('#m-agents input:checked')].map(el=>el.value);
+  if(!checked.length){toast('참석자를 선택하세요');return;}
+  closeMeetingModal();
+  try{
+    const res=await fetch(`/api/meeting/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic,agents:checked})});
+    const data=await res.json();
+    if(data.ok)toast(`🏛️ 회의 시작: ${topic} (${data.participants}명 참석)`);
+    else toast('회의 시작 실패');
+  }catch(e){toast('오류: '+e.message)}
+}
+async function startDailyReport(){
+  if(!currentCompany)return;
+  try{
+    const res=await fetch(`/api/daily-report/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+    const data=await res.json();
+    if(data.ok)toast('📊 데일리 리포트 설정 완료 (매일 자동 실행)');
+    else toast('설정 실패');
+  }catch(e){toast('오류: '+e.message)}
+}
 
 async function addTask(){
   const agent_id=document.getElementById('t-agent').value;
