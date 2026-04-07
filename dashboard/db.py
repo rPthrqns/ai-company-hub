@@ -83,6 +83,17 @@ def init_db():
                 updated_at TEXT DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_docs_company ON documents(company_id, doc_type);
+            CREATE TABLE IF NOT EXISTS webhook_routes (
+                id TEXT PRIMARY KEY,
+                company_id TEXT NOT NULL,
+                source TEXT DEFAULT 'custom',
+                filter_expr TEXT DEFAULT '',
+                target_agent TEXT DEFAULT 'CEO',
+                prompt_template TEXT DEFAULT '',
+                created_at TEXT DEFAULT '',
+                enabled INTEGER DEFAULT 1
+            );
+            CREATE INDEX IF NOT EXISTS idx_routes_company ON webhook_routes(company_id);
             CREATE VIRTUAL TABLE IF NOT EXISTS chat_fts
                 USING fts5(text, company_id UNINDEXED, msg_id UNINDEXED, from_field UNINDEXED, time UNINDEXED, content='', contentless_delete=1);
         """)
@@ -305,6 +316,35 @@ def _save_chat(conn, cid, messages):
             (cid, m.get('from',''), m.get('emoji',''), m.get('text',''),
              m.get('time',''), m.get('type','user'),
              1 if m.get('mention') else 0, m.get('to',''), i))
+
+# ─── Webhook Routes ───
+
+def db_get_webhook_routes(cid):
+    with _lock:
+        conn = _conn()
+        rows = conn.execute("SELECT * FROM webhook_routes WHERE company_id=? AND enabled=1", (cid,)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+def db_add_webhook_route(cid, source, filter_expr, target_agent, prompt_template):
+    import uuid as _uuid
+    route_id = f"route-{_uuid.uuid4().hex[:8]}"
+    with _lock:
+        conn = _conn()
+        import datetime as _dt
+        conn.execute("""INSERT INTO webhook_routes (id, company_id, source, filter_expr, target_agent, prompt_template, created_at)
+                        VALUES (?,?,?,?,?,?,?)""",
+                     (route_id, cid, source, filter_expr, target_agent, prompt_template, _dt.datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+    return route_id
+
+def db_delete_webhook_route(cid, route_id):
+    with _lock:
+        conn = _conn()
+        conn.execute("DELETE FROM webhook_routes WHERE id=? AND company_id=?", (route_id, cid))
+        conn.commit()
+        conn.close()
 
 # ─── Full-Text Search ───
 

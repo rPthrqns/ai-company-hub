@@ -7,7 +7,7 @@ from datetime import datetime
 from db import (init_db, migrate_from_json, db_get_company, db_save_company, db_update_company,
                db_get_all_companies, db_delete_company, db_add_chat, db_add_chats, db_add_activity, db_add_activities,
                db_add_approval, db_get_approvals, db_update_approval, db_get_tasks, db_add_task, db_update_task, db_delete_task,
-               db_search_chat,
+               db_search_chat, db_get_webhook_routes, db_add_webhook_route, db_delete_webhook_route,
                db_get_doc, db_save_doc, db_clear_doc_cache)
 
 # ─── Constants ───
@@ -1068,7 +1068,7 @@ def _register_and_activate(agent_id, workspace, name, role):
 
 # ─── Recurring Task System ───
 
-def add_recurring_task(cid, title, prompt, interval_minutes, agent_id, agent_name, agent_emoji):
+def add_recurring_task(cid, title, prompt, interval_minutes, agent_id, agent_name, agent_emoji, cron_expression=''):
     company = get_company(cid)
     if not company:
         return None
@@ -1078,6 +1078,7 @@ def add_recurring_task(cid, title, prompt, interval_minutes, agent_id, agent_nam
         'id': task_id, 'agent_id': agent_id, 'agent_name': agent_name,
         'agent_emoji': agent_emoji, 'title': title, 'prompt': prompt,
         'interval_minutes': interval_minutes, 'status': 'running',
+        'cron_expression': cron_expression,
         'last_run': None, 'next_run': datetime.now().isoformat(),
         'created_at': datetime.now().isoformat(), 'results': [],
     }
@@ -1929,6 +1930,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/ab-result/'):
             test_id = self.path.split('/')[-1]
             self._json(_AB_RESULTS.get(test_id, {"status": "not_found"}))
+        elif self.path.startswith('/api/webhook-routes/'):
+            cid = self.path.split('/')[-1]
+            self._json(db_get_webhook_routes(cid))
         elif self.path == '/api/agents':
             self._json(AGENT_TEMPLATES)
         elif self.path == '/api/topics':
@@ -2086,6 +2090,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif path.startswith('/api/ab-test/'):
             self._handle_ab_test(path, body)
 
+        elif path.startswith('/api/webhook-route-add/'):
+            self._handle_webhook_route_add(path, body)
+
+        elif path.startswith('/api/webhook-route-delete/'):
+            self._handle_webhook_route_delete(path, body)
+
         elif path.startswith('/api/meeting/'):
             self._handle_meeting(path, body)
 
@@ -2097,7 +2107,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 
     def _handle_webhook(self, path, body):
-        """Receive external webhook and forward to agents."""
+        """Receive external webhook and route via webhook_routes table, fallback CEO."""
         cid = path.split('/')[-1]
         company = get_company(cid)
         if not company: self._json({"error": "not found"}, 404); return
@@ -2105,13 +2115,48 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         req_secret = self.headers.get('X-Webhook-Secret', '')
         if wh_secret and not hmac.compare_digest(req_secret, wh_secret):
             self._json({"error": "unauthorized"}, 401); return
-        text = body.get('text', body.get('message', json.dumps(body, ensure_ascii=False)))
+        payload_str = json.dumps(body, ensure_ascii=False)
+        text = body.get('text', body.get('message', payload_str))
         if not text: self._json({"error": "empty"}, 400); return
         now = datetime.now(); time_str = now.strftime('%H:%M')
         msg = {"from": "webhook", "emoji": "🔗", "text": text[:500], "time": time_str, "type": "user"}
         append_chat(cid, msg, broadcast=True)
-        # Forward to CEO
-        threading.Thread(target=nudge_agent, args=(cid, f"[웹훅 수신] {text[:200]}", 'CEO'), daemon=True).start()
+
+        # Check webhook routes
+        routes = db_get_webhook_routes(cid)
+        routed = False
+        for route in routes:
+            filter_expr = route.get('filter_expr', '').strip()
+            # Simple filter: check if filter keyword is present in payload
+            if filter_expr and filter_expr.lower() not in payload_str.lower():
+                continue
+            tmpl = route.get('prompt_template', '') or f"[웹훅 수신 - {route.get('source','custom')}] {text[:300]}"
+            # Simple {{field}} substitution from body
+            for k, v in body.items():
+                tmpl = tmpl.replace('{{'+k+'}}', str(v))
+            target = route.get('target_agent', 'CEO')
+            threading.Thread(target=nudge_agent, args=(cid, tmpl, target.upper()), daemon=True).start()
+            routed = True
+        if not routed:
+            threading.Thread(target=nudge_agent, args=(cid, f"[웹훅 수신] {text[:200]}", 'CEO'), daemon=True).start()
+        self._json({"ok": True, "routed": routed})
+
+    # ─── Webhook Route Management ───
+    def _handle_webhook_route_add(self, path, body):
+        cid = path.split('/')[-1]
+        if not get_company(cid): self._json({"error": "not found"}, 404); return
+        source = body.get('source', 'custom').strip()[:50]
+        filter_expr = body.get('filter_expr', '').strip()[:200]
+        target_agent = body.get('target_agent', 'CEO').strip()[:50]
+        prompt_template = body.get('prompt_template', '').strip()[:500]
+        route_id = db_add_webhook_route(cid, source, filter_expr, target_agent, prompt_template)
+        self._json({"ok": True, "route_id": route_id})
+
+    def _handle_webhook_route_delete(self, path, body):
+        cid = path.split('/')[-1]
+        route_id = body.get('route_id', '').strip()
+        if not route_id: self._json({"error": "route_id required"}, 400); return
+        db_delete_webhook_route(cid, route_id)
         self._json({"ok": True})
 
     # ─── A/B Agent Test Handler ───
@@ -2621,13 +2666,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         agent = next((a for a in company.get('agents', []) if a['id'] == agent_id), None)
         if not agent: agent = company['agents'][0] if company.get('agents') else None
         if not agent: self._json({"error": "no agents"}, 400); return
+        cron_expression = body.get('cron_expression', '').strip()
         if not title or not prompt: self._json({"error": "title and prompt required"}, 400); return
-        task = add_recurring_task(cid, title, prompt, interval, agent['id'], agent['name'], agent['emoji'])
+        task = add_recurring_task(cid, title, prompt, interval, agent['id'], agent['name'], agent['emoji'], cron_expression=cron_expression)
         if task:
             now_str = datetime.now().strftime('%H:%M')
             company = get_company(cid)
+            schedule_desc = cron_expression if cron_expression else f"{interval}분마다"
             company["chat"].append({"type": "system", "from": "시스템", "emoji": "🔄", "to": "",
-                "text": f"🔄 정기 작업 생성: \"{title}\" ({interval}분마다)"})
+                "text": f"🔄 정기 작업 생성: \"{title}\" ({schedule_desc})"})
             company["activity_log"].append({"time": now_str, "agent": "시스템", "text": f"🔄 정기 작업: {title}"})
             update_company(cid, {"chat": company["chat"], "activity_log": company["activity_log"]})
             self._json({"ok": True, "task": task})
@@ -2863,6 +2910,61 @@ def _watchdog():
         except Exception as e:
             print(f"[watchdog] error: {e}")
 threading.Thread(target=_watchdog, daemon=True).start()
+
+# ─── Simple Cron Expression Matcher ───
+def _cron_matches_now(cron_expr):
+    """Check if a 5-field cron expression matches the current minute.
+    Fields: minute hour day-of-month month day-of-week (standard cron).
+    Supports: * ranges (1-5) lists (1,3,5) step (*/15)."""
+    import calendar
+    now = datetime.now()
+    fields = cron_expr.strip().split()
+    if len(fields) != 5:
+        return False
+    def _match(field, val, lo, hi):
+        if field == '*': return True
+        if '/' in field:
+            base, step = field.split('/', 1)
+            start = 0 if base == '*' else int(base)
+            return (val - start) % int(step) == 0 and val >= start
+        if '-' in field:
+            a, b = field.split('-', 1)
+            return int(a) <= val <= int(b)
+        if ',' in field:
+            return val in [int(x) for x in field.split(',')]
+        return val == int(field)
+    try:
+        return (
+            _match(fields[0], now.minute, 0, 59) and
+            _match(fields[1], now.hour, 0, 23) and
+            _match(fields[2], now.day, 1, 31) and
+            _match(fields[3], now.month, 1, 12) and
+            _match(fields[4], now.weekday(), 0, 6)  # 0=Monday
+        )
+    except Exception:
+        return False
+
+def _cron_scheduler():
+    """Check all recurring tasks with cron_expression field every minute."""
+    while True:
+        try:
+            time.sleep(60 - datetime.now().second)  # Align to minute boundary
+            for cid_entry in db_get_all_companies():
+                cid = cid_entry['id']
+                company = get_company(cid)
+                if not company: continue
+                for task in company.get('recurring_tasks', []):
+                    cron_expr = task.get('cron_expression', '')
+                    if not cron_expr or task.get('status') != 'running': continue
+                    if _cron_matches_now(cron_expr):
+                        print(f"[cron] {cid}/{task.get('title','')} triggered by {cron_expr}")
+                        prompt = task.get('prompt', task.get('title', ''))
+                        agent_id = task.get('agent_id', 'ceo')
+                        threading.Thread(target=nudge_agent, args=(cid, prompt, agent_id.upper()), daemon=True).start()
+        except Exception as e:
+            print(f"[cron] scheduler error: {e}")
+
+threading.Thread(target=_cron_scheduler, daemon=True).start()
 
 with ReusableTCPServer(("", PORT), Handler) as httpd:
     httpd.serve_forever()

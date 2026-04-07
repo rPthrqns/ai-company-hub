@@ -431,6 +431,11 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
       <option value="720">12시간마다</option>
       <option value="1440">매일</option>
     </select>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:4px">
+      <span>Cron 표현식 (선택)</span>
+      <span style="font-size:9px;color:var(--dim)">비워두면 위 주기 사용</span>
+    </label>
+    <input id="t-cron" placeholder="예: 0 9 * * 1-5 (평일 오전 9시)" style="font-family:monospace;font-size:11px" />
     <div class="modal-actions">
       <button class="modal-cancel" onclick="closeTaskModal()">취소</button>
       <button class="modal-submit" id="btn-task" onclick="addTask()"><span>생성</span></button>
@@ -1320,7 +1325,8 @@ async function addTask(){
   if(!title||!prompt){alert('제목과 프롬프트를 입력하세요');return}
   const btn=document.getElementById('btn-task');btn.classList.add('loading');
   try{
-    const res=await fetch(`/api/task-add/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,prompt,interval_minutes:interval,agent_id})});
+    const cron=document.getElementById('t-cron').value.trim();
+  const res=await fetch(`/api/task-add/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,prompt,interval_minutes:interval,agent_id,cron_expression:cron})});
     const data=await res.json();
     if(data.ok){toast(`🔄 "${title}" 작업이 생성되었습니다`);closeTaskModal();document.getElementById('t-title').value='';document.getElementById('t-prompt').value='';refreshCompany()}
     else toast('작업 생성 실패')
