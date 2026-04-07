@@ -8,6 +8,7 @@ from db import (init_db, migrate_from_json, db_get_company, db_save_company, db_
                db_get_all_companies, db_delete_company, db_add_chat, db_add_chats, db_add_activity, db_add_activities,
                db_add_approval, db_get_approvals, db_update_approval, db_get_tasks, db_add_task, db_update_task, db_delete_task,
                db_search_chat, db_get_webhook_routes, db_add_webhook_route, db_delete_webhook_route,
+               db_create_snapshot, db_get_snapshots, db_get_snapshot, db_delete_snapshot,
                db_get_doc, db_save_doc, db_clear_doc_cache)
 
 # ─── Constants ───
@@ -1933,6 +1934,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/webhook-routes/'):
             cid = self.path.split('/')[-1]
             self._json(db_get_webhook_routes(cid))
+        elif self.path.startswith('/api/snapshots/'):
+            cid = self.path.split('/')[-1]
+            self._json(db_get_snapshots(cid))
         elif self.path == '/api/agents':
             self._json(AGENT_TEMPLATES)
         elif self.path == '/api/topics':
@@ -2096,6 +2100,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif path.startswith('/api/webhook-route-delete/'):
             self._handle_webhook_route_delete(path, body)
 
+        elif path.startswith('/api/snapshot/'):
+            self._handle_snapshot(path, body)
+
+        elif path.startswith('/api/fork/'):
+            self._handle_fork(path, body)
+
+        elif path.startswith('/api/restore/'):
+            self._handle_restore(path, body)
+
         elif path.startswith('/api/meeting/'):
             self._handle_meeting(path, body)
 
@@ -2140,6 +2153,50 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not routed:
             threading.Thread(target=nudge_agent, args=(cid, f"[웹훅 수신] {text[:200]}", 'CEO'), daemon=True).start()
         self._json({"ok": True, "routed": routed})
+
+    # ─── Snapshot / Fork / Restore ───
+    def _handle_snapshot(self, path, body):
+        cid = path.split('/')[-1]
+        company = get_company(cid)
+        if not company: self._json({"error": "not found"}, 404); return
+        label = body.get('label', datetime.now().strftime('%Y-%m-%d %H:%M')).strip()[:100]
+        snap_id = db_create_snapshot(cid, label, company)
+        self._json({"ok": True, "snapshot_id": snap_id, "label": label})
+
+    def _handle_fork(self, path, body):
+        """Create a new company from a snapshot."""
+        parts = path.split('/')
+        snap_id = parts[-1]
+        snap = db_get_snapshot(snap_id)
+        if not snap: self._json({"error": "snapshot not found"}, 404); return
+        data = snap['data']
+        new_name = body.get('name', f"{data.get('name','회사')} (포크)").strip()[:100]
+        new_cid = f"fork-{uuid.uuid4().hex[:8]}"
+        fork_company = dict(data)
+        fork_company['id'] = new_cid
+        fork_company['name'] = new_name
+        fork_company['status'] = 'starting'
+        fork_company['created_at'] = datetime.now().isoformat()
+        fork_company['activity_log'] = (data.get('activity_log') or [])[-20:]  # Keep recent history
+        save_company(fork_company)
+        init_companies()
+        sse_broadcast('company_update', {"id": new_cid, "company": get_company(new_cid)})
+        self._json({"ok": True, "new_cid": new_cid, "name": new_name})
+
+    def _handle_restore(self, path, body):
+        """Restore a company to a snapshot state."""
+        parts = path.split('/')
+        snap_id = parts[-1]
+        cid = parts[-2] if len(parts) > 2 else None
+        snap = db_get_snapshot(snap_id)
+        if not snap: self._json({"error": "snapshot not found"}, 404); return
+        if not cid or not get_company(cid): self._json({"error": "company not found"}, 404); return
+        data = dict(snap['data'])
+        data['id'] = cid  # Keep original ID
+        save_company(data)
+        refreshed = get_company(cid)
+        sse_broadcast('company_update', {"id": cid, "company": refreshed})
+        self._json({"ok": True, "restored_to": snap.get('label','')})
 
     # ─── Webhook Route Management ───
     def _handle_webhook_route_add(self, path, body):

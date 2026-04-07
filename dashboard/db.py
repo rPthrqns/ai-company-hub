@@ -85,6 +85,14 @@ def init_db():
                 updated_at TEXT DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_docs_company ON documents(company_id, doc_type);
+            CREATE TABLE IF NOT EXISTS snapshots (
+                id TEXT PRIMARY KEY,
+                company_id TEXT NOT NULL,
+                label TEXT DEFAULT '',
+                data TEXT DEFAULT '{}',
+                created_at TEXT DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_snapshots_company ON snapshots(company_id);
             CREATE TABLE IF NOT EXISTS webhook_routes (
                 id TEXT PRIMARY KEY,
                 company_id TEXT NOT NULL,
@@ -323,6 +331,44 @@ def _save_chat(conn, cid, messages):
             (cid, m.get('from',''), m.get('emoji',''), m.get('text',''),
              m.get('time',''), m.get('type','user'),
              1 if m.get('mention') else 0, m.get('to',''), i))
+
+# ─── Snapshots ───
+
+def db_create_snapshot(cid, label, data_dict):
+    import uuid as _uuid, datetime as _dt
+    snap_id = f"snap-{_uuid.uuid4().hex[:8]}"
+    with _lock:
+        conn = _conn()
+        conn.execute("INSERT INTO snapshots (id, company_id, label, data, created_at) VALUES (?,?,?,?,?)",
+                     (snap_id, cid, label, json.dumps(data_dict, ensure_ascii=False), _dt.datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+    return snap_id
+
+def db_get_snapshots(cid):
+    with _lock:
+        conn = _conn()
+        rows = conn.execute("SELECT id, company_id, label, created_at FROM snapshots WHERE company_id=? ORDER BY created_at DESC LIMIT 20", (cid,)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+def db_get_snapshot(snap_id):
+    with _lock:
+        conn = _conn()
+        row = conn.execute("SELECT * FROM snapshots WHERE id=?", (snap_id,)).fetchone()
+        conn.close()
+        if not row: return None
+        r = dict(row)
+        try: r['data'] = json.loads(r['data'])
+        except Exception: r['data'] = {}
+        return r
+
+def db_delete_snapshot(snap_id):
+    with _lock:
+        conn = _conn()
+        conn.execute("DELETE FROM snapshots WHERE id=?", (snap_id,))
+        conn.commit()
+        conn.close()
 
 # ─── Webhook Routes ───
 

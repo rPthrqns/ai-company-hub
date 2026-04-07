@@ -332,8 +332,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
             <span id="tl-start">—</span><span id="tl-current">현재</span><span id="tl-end">현재</span>
           </div>
         </div>
-        <div style="padding:4px 8px;display:flex;justify-content:flex-end">
-          <button onclick="enterTimeline()" style="background:none;border:1px solid #334155;border-radius:5px;color:var(--dim);font-size:10px;padding:3px 8px;cursor:pointer">⏮ 리플레이 모드</button>
+        <div style="padding:4px 8px;display:flex;justify-content:flex-end;gap:4px">
+          <button onclick="saveSnapshot()" style="background:none;border:1px solid #334155;border-radius:5px;color:var(--dim);font-size:10px;padding:3px 8px;cursor:pointer">📸 스냅샷</button>
+          <button onclick="showSnapshots()" style="background:none;border:1px solid #334155;border-radius:5px;color:var(--dim);font-size:10px;padding:3px 8px;cursor:pointer">📂 복원/포크</button>
+          <button onclick="enterTimeline()" style="background:none;border:1px solid #334155;border-radius:5px;color:var(--dim);font-size:10px;padding:3px 8px;cursor:pointer">⏮ 리플레이</button>
         </div>
         <div id="history-panel"><div style="padding:20px;color:var(--dim);font-size:11px;text-align:center">📜 아직 연혁이 없습니다</div></div>
       </div>
@@ -1402,6 +1404,47 @@ function renderHistory(){
   });
   html+='</div>';
   panel.innerHTML=html;
+}
+
+// ─── Snapshot / Fork / Restore ───
+async function saveSnapshot(){
+  if(!currentCompany)return;
+  const label=prompt('스냅샷 이름을 입력하세요:',new Date().toLocaleString('ko-KR'));
+  if(!label)return;
+  try{
+    const res=await fetch(`/api/snapshot/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label})});
+    const data=await res.json();
+    if(data.ok)toast(`📸 스냅샷 저장: "${data.label}"`);
+    else toast('스냅샷 저장 실패');
+  }catch(e){toast('오류: '+e.message)}
+}
+async function showSnapshots(){
+  if(!currentCompany)return;
+  try{
+    const res=await fetch(`/api/snapshots/${currentCompany}`);
+    const snaps=await res.json();
+    if(!snaps.length){toast('저장된 스냅샷이 없습니다');return;}
+    const choices=snaps.map((s,i)=>`${i+1}. ${s.label} (${new Date(s.created_at).toLocaleString('ko-KR')})`).join('\n');
+    const idxStr=prompt(`스냅샷 선택 (번호 입력):\n${choices}\n\n작업 선택: 번호 뒤에 'f'=포크, 'r'=복원 (예: 1f, 2r)`);
+    if(!idxStr)return;
+    const match=idxStr.trim().match(/^(\d+)([fr]?)$/i);
+    if(!match){toast('잘못된 입력');return;}
+    const snap=snaps[parseInt(match[1])-1];
+    if(!snap){toast('없는 번호');return;}
+    const action=(match[2]||'r').toLowerCase();
+    if(action==='f'){
+      const name=prompt('포크할 회사 이름:',snap.label+' (포크)');
+      if(!name)return;
+      const r=await fetch(`/api/fork/${snap.id}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+      const d=await r.json();
+      if(d.ok)toast(`🔀 포크 생성: "${d.name}"`);
+    }else{
+      if(!confirm(`"${snap.label}" 상태로 복원하시겠습니까? 현재 데이터가 덮어씌워집니다.`))return;
+      const r=await fetch(`/api/restore/${currentCompany}/${snap.id}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+      const d=await r.json();
+      if(d.ok)toast(`⏪ 복원 완료: "${d.restored_to}"`);
+    }
+  }catch(e){toast('오류: '+e.message)}
 }
 
 // ─── Timeline Replay ───
