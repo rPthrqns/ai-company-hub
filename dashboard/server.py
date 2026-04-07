@@ -19,7 +19,8 @@ from db import (init_db, migrate_from_json, db_get_company, db_save_company, db_
                db_add_approval, db_get_approvals, db_update_approval, db_get_tasks, db_add_task, db_update_task, db_delete_task,
                db_search_chat, db_get_webhook_routes, db_add_webhook_route, db_delete_webhook_route,
                db_create_snapshot, db_get_snapshots, db_get_snapshot, db_delete_snapshot,
-               db_get_doc, db_save_doc, db_clear_doc_cache)
+               db_get_doc, db_save_doc, db_clear_doc_cache,
+               db_get_plan_tasks, db_add_plan_task, db_update_plan_task, db_delete_plan_task)
 
 # ─── Constants ───
 PORT = 3000
@@ -3235,6 +3236,37 @@ async def api_daily_report(cid: str, request: Request):
     body = await request.json()
     data, code = _call(Handler._handle_daily_report, f"/api/daily-report/{cid}", body)
     return JSONResponse(data, status_code=code)
+
+# ─── Plan Tasks API ───────────────────────────────────────────────────────────
+
+@app.get("/api/plan-tasks/{cid}")
+async def api_get_plan_tasks(cid: str):
+    tasks = db_get_plan_tasks(cid)
+    return JSONResponse(tasks)
+
+@app.post("/api/plan-task-add/{cid}")
+async def api_add_plan_task(cid: str, request: Request):
+    body = await request.json()
+    task = db_add_plan_task(cid, body)
+    return JSONResponse({"ok": True, "task": task})
+
+@app.post("/api/plan-task-update/{cid}")
+async def api_update_plan_task(cid: str, request: Request):
+    body = await request.json()
+    task_id = body.get("id")
+    if not task_id:
+        return JSONResponse({"ok": False, "error": "id required"}, status_code=400)
+    db_update_plan_task(cid, task_id, body)
+    return JSONResponse({"ok": True})
+
+@app.post("/api/plan-task-delete/{cid}")
+async def api_delete_plan_task(cid: str, request: Request):
+    body = await request.json()
+    task_id = body.get("id")
+    if not task_id:
+        return JSONResponse({"ok": False, "error": "id required"}, status_code=400)
+    db_delete_plan_task(cid, task_id)
+    return JSONResponse({"ok": True})
 
 # ── Static files (must be last — catches everything else) ──────────────────
 

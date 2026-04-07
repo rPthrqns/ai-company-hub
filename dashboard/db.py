@@ -138,18 +138,36 @@ _COMPANY_SCHEMA = """
     CREATE VIRTUAL TABLE IF NOT EXISTS chat_fts
         USING fts5(text, company_id UNINDEXED, msg_id UNINDEXED, from_field UNINDEXED, time UNINDEXED,
                    content='', contentless_delete=1);
+    CREATE TABLE IF NOT EXISTS plan_tasks (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        parent_id TEXT DEFAULT NULL,
+        title TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        status TEXT DEFAULT 'todo',
+        agent_id TEXT DEFAULT '',
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT '',
+        updated_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_plan_tasks_company ON plan_tasks(company_id);
+    CREATE INDEX IF NOT EXISTS idx_plan_tasks_parent ON plan_tasks(parent_id);
 """
 
 def _ensure_company_db(cid: str):
     """Create per-company DB schema if not yet initialised."""
     conn = _conn(cid)
     conn.executescript(_COMPANY_SCHEMA)
-    # Safe migration: add parent_id if missing
-    try:
-        conn.execute("ALTER TABLE chat_messages ADD COLUMN parent_id INTEGER DEFAULT NULL")
-        conn.commit()
-    except Exception:
-        pass
+    # Safe migrations
+    for stmt in [
+        "ALTER TABLE chat_messages ADD COLUMN parent_id INTEGER DEFAULT NULL",
+        "ALTER TABLE plan_tasks ADD COLUMN description TEXT DEFAULT ''",
+    ]:
+        try:
+            conn.execute(stmt)
+            conn.commit()
+        except Exception:
+            pass
     conn.close()
 
 def init_db():
@@ -797,6 +815,61 @@ def db_save_doc(cid, doc_type, agent_id, content):
 
 def db_clear_doc_cache():
     _doc_cache.clear()
+
+# ─── Plan Tasks ───
+
+def db_get_plan_tasks(cid: str) -> list:
+    with _get_lock(cid):
+        conn = _conn(cid)
+        rows = conn.execute(
+            "SELECT * FROM plan_tasks WHERE company_id=? ORDER BY sort_order, created_at",
+            (cid,)
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+def db_add_plan_task(cid: str, task: dict) -> dict:
+    import uuid
+    tid = task.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        conn = _conn(cid)
+        conn.execute(
+            "INSERT INTO plan_tasks (id,company_id,parent_id,title,description,status,agent_id,sort_order,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (tid, cid, task.get('parent_id'), task.get('title',''),
+             task.get('description',''), task.get('status','todo'),
+             task.get('agent_id',''), task.get('sort_order',0), now, now)
+        )
+        conn.commit()
+        conn.close()
+    return {**task, 'id': tid, 'company_id': cid, 'created_at': now, 'updated_at': now}
+
+def db_update_plan_task(cid: str, task_id: str, updates: dict):
+    now = datetime.utcnow().isoformat()
+    allowed = {'title','description','status','agent_id','sort_order','parent_id'}
+    fields = {k: v for k, v in updates.items() if k in allowed}
+    if not fields:
+        return
+    fields['updated_at'] = now
+    set_clause = ', '.join(f"{k}=?" for k in fields)
+    with _get_lock(cid):
+        conn = _conn(cid)
+        conn.execute(
+            f"UPDATE plan_tasks SET {set_clause} WHERE id=? AND company_id=?",
+            (*fields.values(), task_id, cid)
+        )
+        conn.commit()
+        conn.close()
+
+def db_delete_plan_task(cid: str, task_id: str):
+    with _get_lock(cid):
+        conn = _conn(cid)
+        # Delete children first
+        conn.execute("DELETE FROM plan_tasks WHERE parent_id=? AND company_id=?", (task_id, cid))
+        conn.execute("DELETE FROM plan_tasks WHERE id=? AND company_id=?", (task_id, cid))
+        conn.commit()
+        conn.close()
 
 # ─── Migration ───
 
