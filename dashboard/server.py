@@ -2,6 +2,7 @@
 """AI Company Hub - Multi-company Dashboard Server
 Enhanced with Goals, Kanban Board, Cost Tracking, Approval Gates, and Task Dependencies."""
 import asyncio, hmac, json, os, re, http.server, socketserver, subprocess, threading, time, urllib.request, urllib.parse, uuid
+from collections import deque
 from pathlib import Path
 from datetime import datetime
 import sys as _sys
@@ -20,7 +21,12 @@ from db import (init_db, migrate_from_json, db_get_company, db_save_company, db_
                db_search_chat, db_get_webhook_routes, db_add_webhook_route, db_delete_webhook_route,
                db_create_snapshot, db_get_snapshots, db_get_snapshot, db_delete_snapshot,
                db_get_doc, db_save_doc, db_clear_doc_cache,
-               db_get_plan_tasks, db_add_plan_task, db_update_plan_task, db_delete_plan_task)
+               db_get_plan_tasks, db_add_plan_task, db_update_plan_task, db_delete_plan_task,
+               db_get_sprints, db_add_sprint, db_update_sprint, db_get_sprint_tasks, db_link_task_to_sprint,
+               db_get_wiki_pages, db_get_wiki_page, db_save_wiki_page, db_delete_wiki_page,
+               db_get_meetings, db_add_meeting,
+               db_get_milestones, db_add_milestone, db_update_milestone, db_delete_milestone,
+               db_get_risks, db_add_risk, db_update_risk, db_delete_risk)
 
 # ─── Constants ───
 PORT = 3000
@@ -45,27 +51,6 @@ _running_task_threads = set()
 
 # ─── Runtime Abstraction ───
 RUNTIME = get_runtime('openclaw')
-
-def _reset_stuck_agents():
-    """서버 시작 시 working 상태인 에이전트를 active로 리셋"""
-    try:
-        for f in sorted(DATA.glob('company-*.json')):
-            if '-queue' in f.stem:
-                continue
-            cid = f.stem
-            if cid.startswith('company-'):
-                c = get_company(cid)
-                if c:
-                    changed = False
-                    for a in c.get('agents', []):
-                        if a.get('status') == 'working':
-                            a['status'] = 'active'
-                            changed = True
-                    if changed:
-                        save_company(c)
-                        print(f"[reset] {cid}: stuck agents reset to active")
-    except Exception as e:
-        print(f"[reset] error: {e}")
 
 # Default agent templates per role
 AGENT_TEMPLATES = {
@@ -138,7 +123,26 @@ def sse_broadcast(event_type, data):
         for q in dead:
             SSE_QUEUES.remove(q)
 
-import re
+# ─── Inter-agent Communication Permissions ───
+# Modes: "all" = any agent can talk to any, "ceo_only" = only CEO can delegate, "custom" = explicit allow-list
+DEFAULT_COMM_PERMISSIONS = {
+    "mode": "all",          # "all" | "ceo_only" | "custom"
+    "custom_rules": {}      # {"ceo": ["cmo","cto"], "cmo": ["ceo","designer"], ...}
+}
+
+def can_communicate(company, from_id, to_id):
+    """Check if from_agent is allowed to directly message to_agent."""
+    perms = company.get('comm_permissions', DEFAULT_COMM_PERMISSIONS)
+    mode = perms.get('mode', 'all')
+    if mode == 'all':
+        return True
+    if mode == 'ceo_only':
+        return from_id.lower() == 'ceo' or to_id.lower() == 'ceo'
+    if mode == 'custom':
+        rules = perms.get('custom_rules', {})
+        allowed = rules.get(from_id.lower(), [])
+        return to_id.lower() in [a.lower() for a in allowed]
+    return True
 
 def extract_task_from_instruction(text):
     """멘션 내용에서 작업명을 추출"""
@@ -259,7 +263,58 @@ def process_task_commands(cid, text, agent_id):
                     results.append(f"🎉 '{t['title']}' 완료 처리")
                     break
     
+    # CEO 자동 계획(plan) 생성: @멘션으로 팀원에게 지시 시 plan_tasks에 자동 반영
+    if agent_id == 'ceo':
+        _auto_generate_plan(cid, text)
+
     return results
+
+def _auto_generate_plan(cid, text):
+    """CEO 응답에서 @멘션 지시를 감지해 plan_tasks 트리를 자동 생성/업데이트."""
+    mentions = re.findall(r'@(\w+)\s+(.+?)(?=@\w+|\n\n|$)', text, re.DOTALL)
+    if not mentions:
+        return
+    existing = db_get_plan_tasks(cid)
+    existing_titles = {t.get('title','').lower() for t in existing}
+    # Root plan (if not exists)
+    root_id = None
+    for t in existing:
+        if not t.get('parent_id'):
+            root_id = t['id']
+            break
+    if not root_id:
+        company = get_company(cid)
+        topic = company.get('topic', '') if company else ''
+        root = db_add_plan_task(cid, {
+            'title': topic or '프로젝트 계획',
+            'description': f'CEO가 수립한 전체 계획',
+            'status': 'in-progress',
+            'agent_id': 'ceo',
+            'sort_order': 0
+        })
+        root_id = root['id']
+    for target, instruction in mentions:
+        instruction = instruction.strip()
+        if not instruction or len(instruction) < 3:
+            continue
+        title = instruction.split('\n')[0].strip()[:40]
+        if title.lower() in existing_titles:
+            # Update status
+            for t in existing:
+                if t.get('title','').lower() == title.lower() and t.get('status') != 'done':
+                    db_update_plan_task(cid, t['id'], {'status': 'in-progress'})
+                    break
+            continue
+        db_add_plan_task(cid, {
+            'title': title,
+            'description': instruction[:200],
+            'status': 'todo',
+            'agent_id': target.lower(),
+            'parent_id': root_id,
+            'sort_order': len(existing) + 1
+        })
+        existing_titles.add(title.lower())
+    print(f"[auto-plan] {cid}: {len(mentions)} plan tasks from CEO mentions")
 
 def _post_local(url, data, retries=3):
     """POST to localhost with retry on connection failure."""
@@ -1018,8 +1073,6 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji, lang
     if not (agent_workspace / "HEARTBEAT.md").exists():
         (agent_workspace / "HEARTBEAT.md").write_text(
             f"# HEARTBEAT.md\n\n{_s('heartbeat', lang)}\n")
-        (agent_workspace / "HEARTBEAT.md").write_text(
-            f"# HEARTBEAT.md\n\n{_s('heartbeat', lang)}\n")
     mem_dir = agent_workspace / "memory"
     if not mem_dir.exists():
         mem_dir.mkdir(parents=True, exist_ok=True)
@@ -1137,6 +1190,30 @@ def run_meeting(cid, topic, agent_ids):
         ).start()
         time.sleep(0.5)  # Small stagger to avoid race on status updates
 
+    # Auto-save meeting note after a delay (allow agents to respond)
+    def _save_meeting_note():
+        time.sleep(180)  # Wait 3 min for responses
+        comp = get_company(cid)
+        if not comp: return
+        recent = (comp.get('chat', []) or [])[-20:]
+        meeting_msgs = [m for m in recent if topic.lower() in (m.get('text','') or '').lower() or '회의' in (m.get('text','') or '')]
+        summary = '\n'.join(f"[{m.get('from','')}] {(m.get('text',''))[:150]}" for m in meeting_msgs[-10:])
+        # Extract action items (patterns like @agent, ~하겠습니다)
+        actions = []
+        for m in meeting_msgs:
+            text = m.get('text', '')
+            for match in re.findall(r'@(\w+)\s+(.{5,50})', text):
+                actions.append({'agent': match[0], 'action': match[1].strip()})
+        db_add_meeting(cid, {
+            'topic': topic,
+            'participants': [a['id'] for a in agents],
+            'decisions': summary[:500],
+            'action_items': actions[:10],
+            'summary': f"주제: {topic}\n참석자: {len(agents)}명\n요약:\n{summary[:300]}"
+        })
+        print(f"[meeting] auto-saved meeting note for {cid}: {topic}")
+    threading.Thread(target=_save_meeting_note, daemon=True).start()
+
 def update_task_status(cid, task_id, new_status):
     company = get_company(cid)
     if not company:
@@ -1247,7 +1324,7 @@ def execute_task(cid, task):
         return {"time": datetime.now().strftime('%H:%M'), "text": f"오류: {str(e)[:100]}", "elapsed": round(time.time() - start, 1)}
 
 def restore_running_tasks():
-    companies = load_json(COMPANIES_FILE) or []
+    companies = db_get_all_companies()
     for c in companies:
         cid = c.get('id')
         if not cid:
@@ -1329,6 +1406,7 @@ def create_company(name, topic, lang="ko"):
         "id": company_id, "name": name, "topic": topic, "lang": lang,
         "status": "starting", "created_at": datetime.now().isoformat(),
         "budget": DEFAULT_BUDGET,
+        "comm_permissions": {"mode": "all", "custom_rules": {}},
         "agents": agents,
         "goals": [],
         "board_tasks": [],
@@ -1355,10 +1433,9 @@ def create_company(name, topic, lang="ko"):
 # ─── Lightweight Agent Nudge (Empire-style) ───
 
 # Per-agent queue for ordered processing + dedup
-_AGENT_QUEUES = {}  # {"cid:agent_id": deque of texts}
+_AGENT_QUEUES: dict[str, deque] = {}  # {"cid:agent_id": deque of texts}
 _AGENT_BUSY = set()
 _AGENT_STATE_LOCK = threading.Lock()
-from collections import deque
 _MENTION_COUNTS = {}  # {cid: {chain_key: {'count': int, 'ts': float}}}
 _MENTION_LIMIT = 5    # max mentions per chain
 _MENTION_TTL = 1800   # seconds
@@ -1367,6 +1444,7 @@ _ACTIVE_SEMAPHORE = threading.Semaphore(_MAX_CONCURRENT)
 
 _newspaper_cache = {}  # {cid: (brief, timestamp)}
 _AB_RESULTS = {}  # {test_id: {status, agents: [{agent_id, response, elapsed}]}}
+_AB_RESULTS_LOCK = threading.Lock()
 
 
 def _clean_mention_counts(now_ts=None):
@@ -1563,24 +1641,28 @@ def nudge_agent(cid, text, target):
 
     def _process(msg):
         nonlocal session_id
+        print(f"[nudge] _process start: key={key} msg={msg[:50]}")
         with _AGENT_STATE_LOCK:
             if key in _AGENT_BUSY:
+                print(f"[nudge] _process: {key} already busy, returning")
                 return
             _AGENT_BUSY.add(key)
         # Global concurrency limit
+        print(f"[nudge] _process: {key} acquiring semaphore (current _AGENT_BUSY={_AGENT_BUSY})")
         acquired = _ACTIVE_SEMAPHORE.acquire(blocking=True, timeout=60)
         if not acquired:
             print(f"[nudge] {aid} dropped: concurrency limit ({_MAX_CONCURRENT})")
             _AGENT_BUSY.discard(key)
             return
+        print(f"[nudge] _process: {key} semaphore acquired, building context...")
         standup = read_agent_standup(cid, aid)
         inbox = read_agent_inbox(cid, aid)
         ctx_parts = []
         if newspaper: ctx_parts.append(f"=== 브리프 ===\n{newspaper}")
         if inbox: ctx_parts.append(f"=== 받은 메시지 (inbox) ===\n{inbox}")
         if standup: ctx_parts.append(f"=== 내 스탠드업 ===\n{standup}")
-        # 칸반보드 전체 작업 (누가 뭘 하는지 파악)
-        all_tasks = company.get('board_tasks', [])
+        # 칸반보드 전체 작업 (누가 뭘 하는지 파악) — fetch fresh from DB
+        all_tasks = db_get_tasks(cid)
         active_tasks = [t for t in all_tasks if t.get('status') in ('대기', '진행중')]
         if active_tasks:
             ctx_parts.append("=== 팀 작업 현황 ===\n" + '\n'.join(
@@ -1632,6 +1714,7 @@ def nudge_agent(cid, text, target):
                     update_company(cid, {'board_tasks': c['board_tasks']})
                     break
 
+            print(f"[nudge] calling RUNTIME.run for {agent_id} session={session_id} prompt_len={len(prompt)}")
             try:
                 reply_raw = RUNTIME.run(agent_id, session_id, prompt, timeout=120)
             except subprocess.TimeoutExpired:
@@ -1664,20 +1747,38 @@ def nudge_agent(cid, text, target):
                 if reply_raw and 'No reply from agent' not in reply_raw:
                     session_id = new_session  # Use new session going forward
 
-            # All attempts failed — notify user
+            # All attempts failed — escalation chain
             if not reply_raw or 'No reply from agent' in reply_raw:
-                print(f"[nudge] {agent_id} ALL FAILED, notifying user")
-                try:
-                    lang = get_company(cid).get('lang', 'ko') if get_company(cid) else 'ko'
-                    msg = _s('msg.no_reply', lang, emoji=emoji, name=agent_name)
-                    payload = json.dumps({"from": "시스템", "emoji": "⚠️", "text": msg}).encode()
-                    req = urllib.request.Request(
-                        f'http://localhost:3000/api/agent-msg/{cid}',
-                        data=payload, headers={'Content-Type': 'application/json'})
-                    _post_local(req.full_url, json.loads(payload))
-                except Exception as e:
-                    print(f"[nudge] notify failed: {e}")
-                reply_raw = ''  # Skip processing below
+                print(f"[nudge] {agent_id} ALL FAILED, escalating...")
+                escalated = False
+                comp = get_company(cid)
+                if comp and aid != 'ceo':
+                    # Escalate to parent_agent or CEO
+                    parent = next((a for a in comp.get('agents',[]) if a['id']==(agent.get('parent_agent') or 'ceo')), None)
+                    if parent and parent['id'] != aid:
+                        esc_text = f"⚠️ [{agent_name}]가 작업에 실패했습니다. 원래 지시: {text[:100]}\n이 작업을 대신 처리하거나 다른 방법을 제안해주세요."
+                        print(f"[escalation] {aid} → {parent['id']}: {text[:50]}")
+                        append_chat(cid, {"from": "시스템", "emoji": "🔺", "text": f"에스컬레이션: {agent_name} → {parent['name']} (응답 실패)", "time": datetime.now().strftime('%H:%M'), "type": "system"}, broadcast=True)
+                        threading.Thread(target=nudge_agent, args=(cid, esc_text, parent['id'].upper()), daemon=True).start()
+                        escalated = True
+                elif comp and aid == 'ceo':
+                    # CEO failed — escalate to master via approval
+                    append_approval(cid, {
+                        'id': str(uuid.uuid4())[:8], 'from_agent': 'CEO', 'from_emoji': '👔',
+                        'type': '에스컬레이션', 'detail': f"CEO가 처리하지 못한 작업:\n{text[:300]}",
+                        'status': 'pending', 'time': datetime.now().strftime('%H:%M'),
+                        'created_at': datetime.now().isoformat()
+                    })
+                    escalated = True
+                if not escalated:
+                    try:
+                        lang = comp.get('lang', 'ko') if comp else 'ko'
+                        msg = _s('msg.no_reply', lang, emoji=emoji, name=agent_name)
+                        payload = json.dumps({"from": "시스템", "emoji": "⚠️", "text": msg}).encode()
+                        _post_local(f'http://localhost:3000/api/agent-msg/{cid}', json.loads(payload))
+                    except Exception as e:
+                        print(f"[nudge] notify failed: {e}")
+                reply_raw = ''
 
             if reply_raw and 'No reply from agent' not in reply_raw:
                 lines = reply_raw.split('\n')
@@ -1763,18 +1864,20 @@ def nudge_agent(cid, text, target):
                     update_company(cid, {"agents": c['agents']})
             except: pass
             if key in _AGENT_QUEUES and _AGENT_QUEUES[key]:
-                next_text = _AGENT_QUEUES[key].pop(0)
+                next_text = _AGENT_QUEUES[key].popleft()
                 if not _AGENT_QUEUES[key]:
                     del _AGENT_QUEUES[key]
                 threading.Thread(target=_process, args=(next_text,), daemon=True).start()
 
+    print(f"[nudge] dispatch check: key={key} busy={key in _AGENT_BUSY} _AGENT_BUSY={_AGENT_BUSY}")
     if key in _AGENT_BUSY:
         if key not in _AGENT_QUEUES:
-            _AGENT_QUEUES[key] = []
+            _AGENT_QUEUES[key] = deque()
         if len(_AGENT_QUEUES[key]) >= 3:
-            dropped = _AGENT_QUEUES[key].pop(0)
+            dropped = _AGENT_QUEUES[key].popleft()
             print(f"[nudge] {agent_id} queue full, dropped oldest: {dropped[:60]}")
             try:
+                warn_msg = {"from": "시스템", "emoji": "⚠️", "text": f"{agent_name} 대기열 초과: 가장 오래된 요청이 삭제되었습니다", "time": datetime.now().strftime('%H:%M'), "type": "system"}
                 append_chat(cid, warn_msg, broadcast=True)
                 append_activity(cid, {
                     "time": datetime.now().strftime('%H:%M'),
@@ -2012,7 +2115,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._handle_agent_msg(path, body)
 
         elif path == '/api/company/delete':
-            self._handle_company_delete(body)
+            self._handle_company_delete(path, body)
 
         elif path.startswith('/api/agent-add/'):
             self._handle_agent_add(path, body)
@@ -2244,17 +2347,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 lines = reply.split('\n')
                 clean = '\n'.join(l for l in lines if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
                 elapsed = round(time.time() - start, 1)
-                _AB_RESULTS[test_id]['agents'][idx]['response'] = clean or '(응답 없음)'
-                _AB_RESULTS[test_id]['agents'][idx]['elapsed'] = elapsed
-                _AB_RESULTS[test_id]['agents'][idx]['status'] = 'done'
-                _AB_RESULTS[test_id]['agents'][idx]['tokens'] = max(len(clean) // 4, 1)
+                with _AB_RESULTS_LOCK:
+                    _AB_RESULTS[test_id]['agents'][idx]['response'] = clean or '(응답 없음)'
+                    _AB_RESULTS[test_id]['agents'][idx]['elapsed'] = elapsed
+                    _AB_RESULTS[test_id]['agents'][idx]['status'] = 'done'
+                    _AB_RESULTS[test_id]['agents'][idx]['tokens'] = max(len(clean) // 4, 1)
             except Exception as e:
-                _AB_RESULTS[test_id]['agents'][idx]['response'] = f'오류: {e}'
-                _AB_RESULTS[test_id]['agents'][idx]['status'] = 'error'
+                with _AB_RESULTS_LOCK:
+                    _AB_RESULTS[test_id]['agents'][idx]['response'] = f'오류: {e}'
+                    _AB_RESULTS[test_id]['agents'][idx]['status'] = 'error'
             # Check if all done
-            if all(r['status'] in ('done','error') for r in _AB_RESULTS[test_id]['agents']):
-                _AB_RESULTS[test_id]['status'] = 'done'
-                sse_broadcast('ab_done', {'test_id': test_id})
+            with _AB_RESULTS_LOCK:
+                if all(r['status'] in ('done','error') for r in _AB_RESULTS[test_id]['agents']):
+                    _AB_RESULTS[test_id]['status'] = 'done'
+                    sse_broadcast('ab_done', {'test_id': test_id})
 
         for i, a in enumerate(participants):
             threading.Thread(target=_run_agent, args=(i, a), daemon=True).start()
@@ -2509,7 +2615,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # Detect user intervention needed (credentials, external accounts, etc)
         _check_user_intervention(cid, text, from_agent)
 
-        # Agent-to-agent mentions: nudge mentioned agents
+        # Agent-to-agent mentions: nudge mentioned agents (with permission check)
+        from_id = next((a['id'] for a in company.get('agents', []) if a.get('name','').upper() == from_agent.upper() or a['id'].upper() == from_agent.upper()), from_agent.lower())
         if mention_text:
             existing_ids = {a['id'].lower() for a in company.get('agents', [])}
             for ml in mention_text.split('\n'):
@@ -2518,9 +2625,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 for m in re.findall(r'@([A-Za-z0-9]+)', ml):
                     if m.lower() in existing_ids and m.upper() != from_agent.upper():
                         target = m.upper()
+                        if not can_communicate(company, from_id, target.lower()):
+                            print(f"[comm-blocked] {from_agent} → @{target}: permission denied (mode={company.get('comm_permissions',{}).get('mode','all')})")
+                            append_chat(cid, {"from": "시스템", "emoji": "🚫", "text": f"{from_agent}→@{target} 직접 통신이 권한 설정에 의해 차단되었습니다.", "time": datetime.now().strftime('%H:%M'), "type": "system"}, broadcast=True)
+                            continue
                         instruction = re.sub(r'@[A-Za-z0-9]+\s*', '', ml).strip()
                         if not instruction:
-                            # No block content, use full text as context
                             instruction = text
                         add_to_inbox(cid, target.lower(), from_agent, instruction, company.get('lang','ko'))
                         task_title = extract_task_from_instruction(instruction) or instruction[:30]
@@ -2537,18 +2647,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             print(f"[WARN] company missing after update: {cid}")
             return
 
-        # Chain mentions (에이전트→에이전트)
+        # Chain mentions (에이전트→에이전트) with permission check
         existing_ids = {a['id'].lower() for a in company.get('agents', [])}
         block_re = re.compile(r'@(\w+)\s*```([\s\S]*?)```', re.MULTILINE)
         line_re = re.compile(r'@(\w+)\s+(.+)')
         seen = set()
-        # 먼저 모든 멘션을 수집
         pending_mentions = []
         for bm in block_re.finditer(mention_text or text):
             m_name = bm.group(1)
             instruction = bm.group(2).strip()
             upper = m_name.upper()
             if upper != from_agent.upper() and m_name.lower() in existing_ids and upper not in seen:
+                if not can_communicate(company, from_id, m_name.lower()):
+                    print(f"[comm-blocked] {from_agent} → @{upper}: chain mention blocked")
+                    continue
                 seen.add(upper)
                 pending_mentions.append((upper, instruction))
         for line in (mention_text or text).split('\n'):
@@ -2558,6 +2670,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 instruction = lm.group(2).strip()
                 upper = m_name.upper()
                 if upper != from_agent.upper() and m_name.lower() in existing_ids and upper not in seen:
+                    if not can_communicate(company, from_id, m_name.lower()):
+                        print(f"[comm-blocked] {from_agent} → @{upper}: chain mention blocked")
+                        continue
                     seen.add(upper)
                     pending_mentions.append((upper, instruction))
         # 한 번에 대기열 추가 + 에이전트 실행
@@ -2580,22 +2695,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         cid = body.get('id')
         company = get_company(cid)
         if not company: self._json({"ok": True}); return
-        for agent in company.get('agents', []):
-            agent_id = agent.get('agent_id', '')
-            if agent_id:
-                ok = RUNTIME.delete(agent_id)
-                print(f"[delete] agent {agent_id} {'removed' if ok else 'delete failed'}")
-        import shutil
-        company_dir = DATA / cid
-        if company_dir.exists():
-            shutil.rmtree(company_dir, ignore_errors=True)
-        # Remove state files
+        # Collect agent IDs to delete in background (non-blocking)
+        agent_ids = [a.get('agent_id', '') for a in company.get('agents', []) if a.get('agent_id')]
+        def _bg_delete_agents():
+            for aid in agent_ids:
+                try:
+                    ok = RUNTIME.delete(aid)
+                    print(f"[delete] agent {aid} {'removed' if ok else 'delete failed'}")
+                except Exception as e:
+                    print(f"[delete] agent {aid} error: {e}")
+        threading.Thread(target=_bg_delete_agents, daemon=True).start()
+        # Delete from DB (also removes company.db and directory)
+        db_delete_company(cid)
+        # Remove legacy JSON state files
         for suffix in ['.json', '.json.bak', '-queue.json', '-queue.json.bak']:
             f = DATA / f"{cid}{suffix}"
-            if f.exists(): f.unlink()
-        companies = load_json(COMPANIES_FILE)
-        companies = [c for c in companies if c["id"] != cid]
-        save_json(COMPANIES_FILE, companies)
+            if f.exists():
+                try: f.unlink()
+                except OSError: pass
+        # Update legacy companies.json
+        try:
+            companies = load_json(COMPANIES_FILE)
+            companies = [c for c in companies if c["id"] != cid]
+            save_json(COMPANIES_FILE, companies)
+        except Exception: pass
         sse_broadcast('company_update', {"id": cid, "deleted": True})
         self._json({"ok": True})
 
@@ -2619,9 +2742,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         "message": "에이전트가 6명 이상이므로 승인이 필요합니다."})
             return
 
-        self._do_add_agent(cid, company, name, role, emoji, prompt)
+        parent_agent = body.get('parent_agent', '')
+        self._do_add_agent(cid, company, name, role, emoji, prompt, parent_agent)
 
-    def _do_add_agent(self, cid, company, name, role, emoji, prompt):
+    def _do_add_agent(self, cid, company, name, role, emoji, prompt, parent_agent=''):
         aid = re.sub(r'[^a-z0-9]', '-', name.lower())
         agent_id = f"{cid}-{aid}"
         agent_workspace = DATA / cid / "workspaces" / aid
@@ -2632,6 +2756,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             "tasks": [], "messages": [], "prompt": prompt,
             "cost": {"total_tokens": 0, "total_cost": 0.0, "last_run_cost": 0.0},
         }
+        if parent_agent:
+            agent['parent_agent'] = parent_agent
         if not any(a['id'] == aid for a in company['agents']):
             company['agents'].append(agent)
             now = datetime.now().strftime('%H:%M')
@@ -2798,8 +2924,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     # ─── Task Status Update Handler ───
     def _handle_task_status(self, path, body):
-        cid = path.split('/')[-1]
-        task_id = body.get('task_id', '')
+        parts = path.rstrip('/').split('/')
+        cid = parts[-2] if len(parts) >= 2 else parts[-1]
+        task_id = body.get('task_id', '') or (parts[-1] if len(parts) >= 2 and parts[-1] != cid else '')
         new_status = body.get('status', '')
         if not task_id or not new_status: self._json({"error": "task_id and status required"}, 400); return
         task, unlocked = update_board_task_status(cid, task_id, new_status)
@@ -2960,6 +3087,10 @@ def api_get_newspaper(cid: str):
 @app.get("/api/inbox/{cid}/{agent_id}")
 def api_get_inbox(cid: str, agent_id: str):
     return {"inbox": read_agent_inbox(cid, agent_id)}
+
+@app.get("/api/standup/{cid}/{agent_id}")
+def api_get_standup(cid: str, agent_id: str):
+    return {"standup": read_agent_standup(cid, agent_id)}
 
 @app.get("/api/task-list/{cid}")
 def api_get_task_list(cid: str):
@@ -3164,6 +3295,26 @@ async def api_board_task_delete(cid: str, request: Request):
     data, code = _call(Handler._handle_board_task_delete, f"/api/board-task-delete/{cid}", body)
     return JSONResponse(data, status_code=code)
 
+@app.get("/api/comm-permissions/{cid}")
+def api_get_comm_permissions(cid: str):
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(status_code=404, detail="not found")
+    return company.get('comm_permissions', DEFAULT_COMM_PERMISSIONS)
+
+@app.post("/api/comm-permissions/{cid}")
+async def api_set_comm_permissions(cid: str, request: Request):
+    body = await request.json()
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(status_code=404, detail="not found")
+    mode = body.get('mode', 'all')
+    if mode not in ('all', 'ceo_only', 'custom'):
+        return JSONResponse({"error": "mode must be all, ceo_only, or custom"}, status_code=400)
+    perms = {"mode": mode, "custom_rules": body.get('custom_rules', company.get('comm_permissions', {}).get('custom_rules', {}))}
+    update_company(cid, {"comm_permissions": perms})
+    return {"ok": True, "comm_permissions": perms}
+
 @app.post("/api/approval-approve/{cid}")
 async def api_approval_approve(cid: str, request: Request):
     body = await request.json()
@@ -3268,6 +3419,292 @@ async def api_delete_plan_task(cid: str, request: Request):
     db_delete_plan_task(cid, task_id)
     return JSONResponse({"ok": True})
 
+# ─── Sprint API ───────────────────────────────────────────────────────────
+
+@app.get("/api/sprints/{cid}")
+def api_get_sprints(cid: str):
+    return db_get_sprints(cid)
+
+@app.post("/api/sprint-add/{cid}")
+async def api_add_sprint(cid: str, request: Request):
+    body = await request.json()
+    sprint = db_add_sprint(cid, body)
+    return {"ok": True, "sprint": sprint}
+
+@app.post("/api/sprint-update/{cid}/{sprint_id}")
+async def api_update_sprint(cid: str, sprint_id: str, request: Request):
+    body = await request.json()
+    db_update_sprint(cid, sprint_id, body)
+    return {"ok": True}
+
+@app.get("/api/sprint-tasks/{cid}/{sprint_id}")
+def api_get_sprint_tasks(cid: str, sprint_id: str):
+    return db_get_sprint_tasks(cid, sprint_id)
+
+@app.post("/api/sprint-end/{cid}/{sprint_id}")
+async def api_end_sprint(cid: str, sprint_id: str):
+    """End sprint and auto-generate retrospective."""
+    tasks = db_get_sprint_tasks(cid, sprint_id)
+    done = [t for t in tasks if t.get('status') == '완료']
+    pending = [t for t in tasks if t.get('status') != '완료']
+    total = len(tasks)
+    rate = round(len(done)/total*100) if total else 0
+    retro = f"## 스프린트 회고\n- 완료율: {rate}% ({len(done)}/{total})\n"
+    retro += f"- ✅ 완료: {', '.join(t.get('title','') for t in done[:10])}\n" if done else "- ✅ 완료: 없음\n"
+    retro += f"- ⏳ 미완료: {', '.join(t.get('title','') for t in pending[:10])}\n" if pending else ""
+    db_update_sprint(cid, sprint_id, {'status': 'done', 'retro': retro})
+    return {"ok": True, "retro": retro, "completion_rate": rate}
+
+# ─── Wiki / Knowledge Base API ────────────────────────────────────────────
+
+@app.get("/api/wiki/{cid}")
+def api_get_wiki(cid: str, category: str | None = None):
+    return db_get_wiki_pages(cid, category)
+
+@app.get("/api/wiki/{cid}/{page_id}")
+def api_get_wiki_page(cid: str, page_id: str):
+    page = db_get_wiki_page(cid, page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="not found")
+    return page
+
+@app.post("/api/wiki/{cid}")
+async def api_save_wiki(cid: str, request: Request):
+    body = await request.json()
+    page = db_save_wiki_page(cid, body)
+    return {"ok": True, "page": page}
+
+@app.delete("/api/wiki/{cid}/{page_id}")
+def api_delete_wiki(cid: str, page_id: str):
+    db_delete_wiki_page(cid, page_id)
+    return {"ok": True}
+
+# ─── KPI Dashboard API ────────────────────────────────────────────────────
+
+@app.get("/api/kpi/{cid}")
+def api_get_kpi(cid: str):
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(status_code=404, detail="not found")
+    agents = company.get('agents', [])
+    tasks = db_get_tasks(cid)
+    total_tasks = len(tasks)
+    done_tasks = len([t for t in tasks if t.get('status') == '완료'])
+    in_progress = len([t for t in tasks if t.get('status') == '진행중'])
+    total_cost = sum(a.get('cost', {}).get('total_cost', 0) for a in agents)
+    total_tokens = sum(a.get('cost', {}).get('total_tokens', 0) for a in agents)
+    active_agents = len([a for a in agents if a.get('status') == 'active'])
+
+    agent_kpis = []
+    for a in agents:
+        a_tasks = [t for t in tasks if t.get('agent_id') == a['id']]
+        a_done = len([t for t in a_tasks if t.get('status') == '완료'])
+        a_total = len(a_tasks)
+        cost = a.get('cost', {})
+        agent_kpis.append({
+            'id': a['id'], 'name': a['name'], 'emoji': a.get('emoji', '🤖'),
+            'status': a.get('status', ''),
+            'task_total': a_total, 'task_done': a_done,
+            'completion_rate': round(a_done/a_total*100) if a_total else 0,
+            'total_cost': cost.get('total_cost', 0),
+            'total_tokens': cost.get('total_tokens', 0),
+        })
+
+    sprints = db_get_sprints(cid)
+    active_sprint = next((s for s in sprints if s.get('status') == 'active'), None)
+
+    return {
+        'company': {'name': company.get('name',''), 'topic': company.get('topic','')},
+        'summary': {
+            'total_tasks': total_tasks, 'done_tasks': done_tasks, 'in_progress': in_progress,
+            'completion_rate': round(done_tasks/total_tasks*100) if total_tasks else 0,
+            'total_cost': round(total_cost, 6), 'total_tokens': total_tokens,
+            'active_agents': active_agents, 'total_agents': len(agents),
+        },
+        'agents': agent_kpis,
+        'active_sprint': active_sprint,
+    }
+
+# ─── Auto Standup API ─────────────────────────────────────────────────────
+
+@app.post("/api/standup-run/{cid}")
+async def api_run_standup(cid: str):
+    """Trigger standup for all agents and return aggregated report."""
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(status_code=404, detail="not found")
+    agents = company.get('agents', [])
+    results = {}
+
+    def _agent_standup(a):
+        aid = a['id']
+        agent_id = a.get('agent_id', f"{cid}-{aid}")
+        tasks = [t for t in db_get_tasks(cid) if t.get('agent_id') == aid]
+        done = [t for t in tasks if t.get('status') == '완료']
+        doing = [t for t in tasks if t.get('status') == '진행중']
+        prompt = (
+            f"당신은 {a['name']}입니다. 스탠드업 보고를 작성하세요.\n"
+            f"완료: {', '.join(t.get('title','') for t in done[-3:]) or '없음'}\n"
+            f"진행중: {', '.join(t.get('title','') for t in doing[:3]) or '없음'}\n"
+            f"다음 형식으로만 답하세요:\n어제: [한 줄]\n오늘: [한 줄]\n블로커: [한 줄 또는 '없음']"
+        )
+        try:
+            reply = RUNTIME.run(agent_id, f"{agent_id}-standup", prompt, timeout=30)
+            clean = '\n'.join(l for l in reply.split('\n') if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
+            results[aid] = clean or '(무응답)'
+            db_save_doc(cid, 'standup', aid, clean)
+        except Exception:
+            results[aid] = '(타임아웃)'
+
+    threads = [threading.Thread(target=_agent_standup, args=(a,), daemon=True) for a in agents if a.get('status') != 'registering']
+    for t in threads: t.start()
+    for t in threads: t.join(timeout=40)
+
+    # Aggregate
+    report = f"# 📋 데일리 스탠드업 ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
+    for a in agents:
+        standup = results.get(a['id'], '(미참여)')
+        report += f"## {a.get('emoji','')} {a['name']}\n{standup}\n\n"
+
+    db_save_doc(cid, 'standup_report', '', report)
+    return {"ok": True, "report": report, "agents": results}
+
+# ─── Meeting Notes API ─────────────────────────────────────────────────────
+
+@app.get("/api/meetings/{cid}")
+def api_get_meetings(cid: str):
+    return db_get_meetings(cid)
+
+@app.post("/api/meeting-save/{cid}")
+async def api_save_meeting(cid: str, request: Request):
+    body = await request.json()
+    meeting = db_add_meeting(cid, body)
+    return {"ok": True, "meeting": meeting}
+
+# ─── Milestones API ────────────────────────────────────────────────────────
+
+@app.get("/api/milestones/{cid}")
+def api_get_milestones(cid: str):
+    return db_get_milestones(cid)
+
+@app.post("/api/milestone-add/{cid}")
+async def api_add_milestone(cid: str, request: Request):
+    body = await request.json()
+    ms = db_add_milestone(cid, body)
+    return {"ok": True, "milestone": ms}
+
+@app.post("/api/milestone-update/{cid}/{mid}")
+async def api_update_milestone(cid: str, mid: str, request: Request):
+    body = await request.json()
+    db_update_milestone(cid, mid, body)
+    return {"ok": True}
+
+@app.delete("/api/milestone/{cid}/{mid}")
+def api_delete_milestone(cid: str, mid: str):
+    db_delete_milestone(cid, mid)
+    return {"ok": True}
+
+# ─── Risks API ─────────────────────────────────────────────────────────────
+
+@app.get("/api/risks/{cid}")
+def api_get_risks(cid: str):
+    return db_get_risks(cid)
+
+@app.post("/api/risk-add/{cid}")
+async def api_add_risk(cid: str, request: Request):
+    body = await request.json()
+    risk = db_add_risk(cid, body)
+    return {"ok": True, "risk": risk}
+
+@app.post("/api/risk-update/{cid}/{rid}")
+async def api_update_risk(cid: str, rid: str, request: Request):
+    body = await request.json()
+    db_update_risk(cid, rid, body)
+    return {"ok": True}
+
+@app.delete("/api/risk/{cid}/{rid}")
+def api_delete_risk(cid: str, rid: str):
+    db_delete_risk(cid, rid)
+    return {"ok": True}
+
+# ─── Performance Review API ───────────────────────────────────────────────
+
+@app.get("/api/performance/{cid}")
+def api_performance_review(cid: str):
+    """Generate performance review for all agents."""
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(status_code=404, detail="not found")
+    tasks = db_get_tasks(cid)
+    agents = company.get('agents', [])
+    reviews = []
+    for a in agents:
+        a_tasks = [t for t in tasks if t.get('agent_id') == a['id']]
+        done = [t for t in a_tasks if t.get('status') == '완료']
+        blocked = [t for t in a_tasks if t.get('status') == '검토']
+        cost = a.get('cost', {})
+        total = len(a_tasks)
+        rate = round(len(done)/total*100) if total else 0
+        # Score: completion rate weighted + cost efficiency
+        score = min(100, rate + (10 if cost.get('total_cost',0) < 0.01 else 0) - len(blocked)*5)
+        grade = '🌟 S' if score>=90 else '✅ A' if score>=75 else '📊 B' if score>=50 else '⚠️ C' if score>=25 else '❌ D'
+        reviews.append({
+            'id': a['id'], 'name': a['name'], 'emoji': a.get('emoji','🤖'),
+            'role': a.get('role',''), 'status': a.get('status',''),
+            'task_total': total, 'task_done': len(done), 'task_blocked': len(blocked),
+            'completion_rate': rate, 'cost': cost.get('total_cost',0),
+            'tokens': cost.get('total_tokens',0),
+            'score': max(0,score), 'grade': grade,
+        })
+    reviews.sort(key=lambda r: r['score'], reverse=True)
+    return {'reviews': reviews, 'generated_at': datetime.now().isoformat()}
+
+# ─── Onboarding API ───────────────────────────────────────────────────────
+
+@app.post("/api/onboard/{cid}/{agent_id}")
+async def api_onboard_agent(cid: str, agent_id: str):
+    """Run onboarding for a specific agent — teach them about the company context."""
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(status_code=404, detail="not found")
+    agent = next((a for a in company.get('agents',[]) if a['id']==agent_id), None)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+    # Build onboarding context
+    wiki_pages = db_get_wiki_pages(cid)
+    wiki_summary = '\n'.join(f"- {p.get('title','')}: {(p.get('content',''))[:100]}" for p in wiki_pages[:5])
+    milestones = db_get_milestones(cid)
+    ms_summary = '\n'.join(f"- {m.get('title','')} (기한: {m.get('deadline','미정')})" for m in milestones[:5])
+    risks = db_get_risks(cid)
+    risk_summary = '\n'.join(f"- [{r.get('severity','')}] {r.get('title','')}" for r in risks[:5] if r.get('status')=='open')
+    tasks = db_get_tasks(cid)
+    my_tasks = [t for t in tasks if t.get('agent_id')==agent_id]
+
+    onboard_prompt = (
+        f"당신은 {agent['name']}({agent.get('role','')})으로서 '{company.get('name','')}' 회사에 합류했습니다.\n"
+        f"회사 주제: {company.get('topic','')}\n\n"
+        f"=== 지식 베이스 ===\n{wiki_summary or '(아직 없음)'}\n\n"
+        f"=== 마일스톤 ===\n{ms_summary or '(아직 없음)'}\n\n"
+        f"=== 리스크 ===\n{risk_summary or '(없음)'}\n\n"
+        f"=== 당신의 할당 작업 ({len(my_tasks)}건) ===\n"
+        + '\n'.join(f"- [{t.get('status','')}] {t.get('title','')}" for t in my_tasks[:10]) + '\n\n'
+        "위 컨텍스트를 숙지하고, 당신의 역할과 앞으로의 계획을 간단히 보고하세요."
+    )
+    full_agent_id = agent.get('agent_id', f"{cid}-{agent_id}")
+    def _run():
+        try:
+            reply = RUNTIME.run(full_agent_id, f"{full_agent_id}-onboard", onboard_prompt, timeout=60)
+            clean = '\n'.join(l for l in reply.split('\n') if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
+            if clean:
+                db_save_doc(cid, 'onboard', agent_id, clean)
+                append_chat(cid, {"from": agent['name'], "emoji": agent.get('emoji','🤖'),
+                    "text": f"📚 온보딩 완료!\n{clean}", "time": datetime.now().strftime('%H:%M'), "type": "agent"}, broadcast=True)
+                print(f"[onboard] {agent_id} completed")
+        except Exception as e:
+            print(f"[onboard] {agent_id} error: {e}")
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "message": f"{agent['name']} 온보딩 시작됨"}
+
 # ── Static files (must be last — catches everything else) ──────────────────
 
 app.mount("/", StaticFiles(directory=str(BASE / "dashboard"), html=True), name="static")
@@ -3280,7 +3717,7 @@ class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 def ensure_agents_registered():
     """On startup, re-register all agents from companies data. Runs non-blocking."""
-    companies = load_json(COMPANIES_FILE, [])
+    companies = db_get_all_companies()
     try:
         from runtime.openclaw import OpenClawRuntime
         registered_output = OpenClawRuntime().list_registered()
@@ -3316,8 +3753,86 @@ def ensure_agents_registered():
                                wait=False, on_done=make_done(cid, agent['id']), company_id=cid)
             elif agent.get('status') in ('registering', 'working'):
                 agent['status'] = 'active'
-                save_company(company)
+                c = get_company(cid)
+                if c:
+                    for a in c.get('agents', []):
+                        if a['id'] == agent['id']:
+                            a['status'] = 'active'
+                            break
+                    update_company(cid, {'agents': c['agents']})
+    # Warm up all agent sessions (activate CMO/CTO/etc.)
+    _warmup_all_sessions(companies)
 
+def _warmup_all_sessions(companies):
+    """Activate sessions for all registered agents (not just CEO)."""
+    def _warmup_agent(agent_id, name, role):
+        try:
+            sessions_dir = Path.home() / '.openclaw' / 'agents' / agent_id / 'sessions'
+            # Check if any session file exists (skip if already warmed)
+            if sessions_dir.exists():
+                session_files = [f for f in sessions_dir.iterdir() if f.suffix == '.jsonl' and not f.name.endswith('.lock')]
+                if session_files:
+                    print(f"[warmup] {agent_id} session already exists ({len(session_files)} files), skipping")
+                    return
+            # Use a dedicated warmup session (not main) to avoid conflicts
+            warmup_session = f"{agent_id}-warmup"
+            print(f"[warmup] activating session for {agent_id} ({name})...")
+            RUNTIME.run(agent_id, warmup_session,
+                        f'당신은 {name}({role})입니다. 준비 완료라고만 답하세요.', timeout=30)
+            print(f"[warmup] {agent_id} session activated")
+        except Exception as e:
+            print(f"[warmup] {agent_id} failed: {e}")
+
+    threads = []
+    for company in companies:
+        for agent in company.get('agents', []):
+            agent_id = agent.get('agent_id', '')
+            if not agent_id or agent.get('status') == 'registering':
+                continue
+            t = threading.Thread(target=_warmup_agent,
+                                 args=(agent_id, agent.get('name',''), agent.get('role','')),
+                                 daemon=True)
+            threads.append(t)
+            t.start()
+    # Don't block startup — threads run in background
+    print(f"[warmup] {len(threads)} agent sessions warming up in background")
+
+def _cleanup_stale_locks():
+    """Remove stale .lock files from openclaw agent sessions on startup."""
+    agents_dir = Path.home() / '.openclaw' / 'agents'
+    if not agents_dir.exists():
+        return
+    cleaned = 0
+    for lock_file in agents_dir.rglob('*.lock'):
+        try:
+            content = lock_file.read_text().strip()
+            pid = None
+            for line in content.split('\n'):
+                if line.startswith('"pid":') or '"pid"' in line:
+                    import re as _re
+                    m = _re.search(r'"pid"\s*:\s*(\d+)', content)
+                    if m:
+                        pid = int(m.group(1))
+                    break
+            if pid:
+                try:
+                    os.kill(pid, 0)
+                    # Process still alive — skip
+                    continue
+                except OSError:
+                    pass
+            lock_file.unlink()
+            cleaned += 1
+        except Exception:
+            try:
+                lock_file.unlink()
+                cleaned += 1
+            except Exception:
+                pass
+    if cleaned:
+        print(f"[init] cleaned {cleaned} stale lock files")
+
+_cleanup_stale_locks()
 init_db()
 migrate_from_json()
 init_companies()
@@ -3385,7 +3900,7 @@ def _cron_matches_now(cron_expr):
             _match(fields[1], now.hour, 0, 23) and
             _match(fields[2], now.day, 1, 31) and
             _match(fields[3], now.month, 1, 12) and
-            _match(fields[4], now.weekday(), 0, 6)  # 0=Monday
+            _match(fields[4], (now.weekday() + 1) % 7, 0, 6)  # 0=Sunday (cron standard)
         )
     except Exception:
         return False
@@ -3411,5 +3926,30 @@ def _cron_scheduler():
             print(f"[cron] scheduler error: {e}")
 
 threading.Thread(target=_cron_scheduler, daemon=True).start()
+
+def _auto_standup_scheduler():
+    """Run auto standup every day at 09:00."""
+    _last_run = None
+    while True:
+        try:
+            time.sleep(60)
+            now = datetime.now()
+            if now.hour == 9 and now.minute == 0 and _last_run != now.date():
+                _last_run = now.date()
+                print(f"[standup] auto standup triggered at {now}")
+                for cid_entry in db_get_all_companies():
+                    cid = cid_entry['id']
+                    try:
+                        import urllib.request as _ur
+                        req = _ur.Request(f'http://localhost:{PORT}/api/standup-run/{cid}', method='POST',
+                                         headers={'Content-Type':'application/json'}, data=b'{}')
+                        _ur.urlopen(req, timeout=120)
+                        print(f"[standup] {cid} standup done")
+                    except Exception as e:
+                        print(f"[standup] {cid} error: {e}")
+        except Exception as e:
+            print(f"[standup] scheduler error: {e}")
+
+threading.Thread(target=_auto_standup_scheduler, daemon=True).start()
 
 uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")

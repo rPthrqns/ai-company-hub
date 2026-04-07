@@ -152,6 +152,69 @@ _COMPANY_SCHEMA = """
     );
     CREATE INDEX IF NOT EXISTS idx_plan_tasks_company ON plan_tasks(company_id);
     CREATE INDEX IF NOT EXISTS idx_plan_tasks_parent ON plan_tasks(parent_id);
+    CREATE TABLE IF NOT EXISTS sprints (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        goal TEXT DEFAULT '',
+        start_date TEXT DEFAULT '',
+        end_date TEXT DEFAULT '',
+        status TEXT DEFAULT 'planning',
+        created_at TEXT DEFAULT '',
+        retro TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_sprints_company ON sprints(company_id);
+    CREATE TABLE IF NOT EXISTS sprint_tasks (
+        sprint_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        PRIMARY KEY (sprint_id, task_id)
+    );
+    CREATE TABLE IF NOT EXISTS wiki_pages (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        content TEXT DEFAULT '',
+        author TEXT DEFAULT '',
+        category TEXT DEFAULT 'general',
+        created_at TEXT DEFAULT '',
+        updated_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_wiki_company ON wiki_pages(company_id);
+    CREATE TABLE IF NOT EXISTS meeting_notes (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        topic TEXT DEFAULT '',
+        participants TEXT DEFAULT '[]',
+        decisions TEXT DEFAULT '',
+        action_items TEXT DEFAULT '[]',
+        summary TEXT DEFAULT '',
+        created_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_meetings_company ON meeting_notes(company_id);
+    CREATE TABLE IF NOT EXISTS milestones (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        deadline TEXT DEFAULT '',
+        status TEXT DEFAULT 'pending',
+        linked_tasks TEXT DEFAULT '[]',
+        created_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_milestones_company ON milestones(company_id);
+    CREATE TABLE IF NOT EXISTS risks (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        severity TEXT DEFAULT 'medium',
+        status TEXT DEFAULT 'open',
+        owner TEXT DEFAULT '',
+        mitigation TEXT DEFAULT '',
+        created_at TEXT DEFAULT '',
+        updated_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_risks_company ON risks(company_id);
 """
 
 def _ensure_company_db(cid: str):
@@ -382,6 +445,7 @@ def db_get_chat(cid):
                 "DELETE FROM chat_messages WHERE company_id=? AND id NOT IN "
                 "(SELECT id FROM chat_messages WHERE company_id=? ORDER BY id DESC LIMIT 200)",
                 (cid, cid))
+            conn.commit()
         rows = conn.execute(
             "SELECT * FROM chat_messages WHERE company_id=? ORDER BY sort_order, id", (cid,)).fetchall()
         conn.close()
@@ -425,12 +489,20 @@ def db_add_chats(cid, messages):
         conn = _conn(cid)
         count = conn.execute("SELECT COUNT(*) FROM chat_messages WHERE company_id=?", (cid,)).fetchone()[0]
         for i, msg in enumerate(messages):
-            conn.execute("""INSERT INTO chat_messages
+            cursor = conn.execute("""INSERT INTO chat_messages
                 (company_id, from_field, emoji, text, time, msg_type, mention, to_field, sort_order)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (cid, msg.get('from',''), msg.get('emoji',''), msg.get('text',''),
                  msg.get('time',''), msg.get('type','user'),
                  1 if msg.get('mention') else 0, msg.get('to',''), count + i))
+            text = msg.get('text','')
+            if text:
+                try:
+                    conn.execute(
+                        "INSERT INTO chat_fts(text, company_id, msg_id, from_field, time) VALUES (?,?,?,?,?)",
+                        (text, cid, cursor.lastrowid, msg.get('from',''), msg.get('time','')))
+                except Exception:
+                    pass
         conn.execute(
             "DELETE FROM chat_messages WHERE company_id=? AND id NOT IN "
             "(SELECT id FROM chat_messages WHERE company_id=? ORDER BY id DESC LIMIT 200)",
@@ -550,34 +622,17 @@ def db_search_chat(query, company_ids=None, limit=50):
             conn = _conn(cid)
             try:
                 rows = conn.execute(
-                    """SELECT f.company_id, f.msg_id, f.from_field, f.time,
-                              c.emoji, c.text
-                       FROM chat_fts f
-                       JOIN chat_messages c ON c.id = CAST(f.msg_id AS INTEGER)
-                       WHERE chat_fts MATCH ?
-                       ORDER BY rank LIMIT ?""",
-                    (f'"{safe_query}"', limit)
+                    "SELECT company_id, id as msg_id, from_field, time, emoji, text "
+                    "FROM chat_messages WHERE text LIKE ? ORDER BY id DESC LIMIT ?",
+                    (f'%{query}%', limit)
                 ).fetchall()
                 results.extend([{
                     'company_id': r['company_id'], 'msg_id': r['msg_id'],
                     'from': r['from_field'], 'emoji': r['emoji'],
                     'text': r['text'], 'time': r['time']
                 } for r in rows])
-            except Exception:
-                # FTS fallback
-                try:
-                    rows = conn.execute(
-                        "SELECT company_id, id as msg_id, from_field, time, emoji, text "
-                        "FROM chat_messages WHERE text LIKE ? ORDER BY id DESC LIMIT ?",
-                        (f'%{query}%', limit)
-                    ).fetchall()
-                    results.extend([{
-                        'company_id': r['company_id'], 'msg_id': r['msg_id'],
-                        'from': r['from_field'], 'emoji': r['emoji'],
-                        'text': r['text'], 'time': r['time']
-                    } for r in rows])
-                except Exception as e:
-                    print(f"[search] fallback error for {cid}: {e}")
+            except Exception as e:
+                print(f"[search] error for {cid}: {e}")
             finally:
                 conn.close()
         if len(results) >= limit:
@@ -820,6 +875,7 @@ def db_clear_doc_cache():
 
 def db_get_plan_tasks(cid: str) -> list:
     with _get_lock(cid):
+        _ensure_company_db(cid)
         conn = _conn(cid)
         rows = conn.execute(
             "SELECT * FROM plan_tasks WHERE company_id=? ORDER BY sort_order, created_at",
@@ -854,6 +910,7 @@ def db_update_plan_task(cid: str, task_id: str, updates: dict):
     fields['updated_at'] = now
     set_clause = ', '.join(f"{k}=?" for k in fields)
     with _get_lock(cid):
+        _ensure_company_db(cid)
         conn = _conn(cid)
         conn.execute(
             f"UPDATE plan_tasks SET {set_clause} WHERE id=? AND company_id=?",
@@ -864,10 +921,247 @@ def db_update_plan_task(cid: str, task_id: str, updates: dict):
 
 def db_delete_plan_task(cid: str, task_id: str):
     with _get_lock(cid):
+        _ensure_company_db(cid)
         conn = _conn(cid)
         # Delete children first
         conn.execute("DELETE FROM plan_tasks WHERE parent_id=? AND company_id=?", (task_id, cid))
         conn.execute("DELETE FROM plan_tasks WHERE id=? AND company_id=?", (task_id, cid))
+        conn.commit()
+        conn.close()
+
+# ─── Sprints ───
+
+def db_get_sprints(cid):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute("SELECT * FROM sprints WHERE company_id=? ORDER BY created_at DESC", (cid,)).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+def db_add_sprint(cid, sprint):
+    import uuid
+    sid = sprint.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute(
+            "INSERT INTO sprints (id,company_id,title,goal,start_date,end_date,status,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (sid, cid, sprint.get('title',''), sprint.get('goal',''),
+             sprint.get('start_date',''), sprint.get('end_date',''), 'active', now))
+        for tid in sprint.get('task_ids', []):
+            conn.execute("INSERT OR IGNORE INTO sprint_tasks (sprint_id,task_id) VALUES (?,?)", (sid, tid))
+        conn.commit()
+        conn.close()
+    return {**sprint, 'id': sid, 'status': 'active', 'created_at': now}
+
+def db_update_sprint(cid, sprint_id, updates):
+    allowed = {'title','goal','start_date','end_date','status','retro'}
+    fields = {k: v for k, v in updates.items() if k in allowed}
+    if not fields:
+        return
+    set_clause = ', '.join(f"{k}=?" for k in fields)
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute(f"UPDATE sprints SET {set_clause} WHERE id=? AND company_id=?",
+                     (*fields.values(), sprint_id, cid))
+        if 'task_ids' in updates:
+            conn.execute("DELETE FROM sprint_tasks WHERE sprint_id=?", (sprint_id,))
+            for tid in updates['task_ids']:
+                conn.execute("INSERT OR IGNORE INTO sprint_tasks (sprint_id,task_id) VALUES (?,?)", (sprint_id, tid))
+        conn.commit()
+        conn.close()
+
+def db_get_sprint_tasks(cid, sprint_id):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute(
+            "SELECT bt.* FROM board_tasks bt JOIN sprint_tasks st ON bt.id=st.task_id WHERE st.sprint_id=? AND bt.company_id=?",
+            (sprint_id, cid)).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+def db_link_task_to_sprint(cid, sprint_id, task_id):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute("INSERT OR IGNORE INTO sprint_tasks (sprint_id,task_id) VALUES (?,?)", (sprint_id, task_id))
+        conn.commit()
+        conn.close()
+
+# ─── Wiki / Knowledge Base ───
+
+def db_get_wiki_pages(cid, category=None):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        if category:
+            rows = conn.execute("SELECT * FROM wiki_pages WHERE company_id=? AND category=? ORDER BY updated_at DESC", (cid, category)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM wiki_pages WHERE company_id=? ORDER BY updated_at DESC", (cid,)).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+def db_get_wiki_page(cid, page_id):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        row = conn.execute("SELECT * FROM wiki_pages WHERE id=? AND company_id=?", (page_id, cid)).fetchone()
+        conn.close()
+    return dict(row) if row else None
+
+def db_save_wiki_page(cid, page):
+    import uuid
+    pid = page.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute(
+            "INSERT OR REPLACE INTO wiki_pages (id,company_id,title,content,author,category,created_at,updated_at) VALUES (?,?,?,?,?,?,COALESCE((SELECT created_at FROM wiki_pages WHERE id=?),?),?)",
+            (pid, cid, page.get('title',''), page.get('content',''), page.get('author',''),
+             page.get('category','general'), pid, now, now))
+        conn.commit()
+        conn.close()
+    return {**page, 'id': pid, 'updated_at': now}
+
+def db_delete_wiki_page(cid, page_id):
+    with _get_lock(cid):
+        conn = _conn(cid)
+        conn.execute("DELETE FROM wiki_pages WHERE id=? AND company_id=?", (page_id, cid))
+        conn.commit()
+        conn.close()
+
+# ─── Meeting Notes ───
+
+def db_get_meetings(cid):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute("SELECT * FROM meeting_notes WHERE company_id=? ORDER BY created_at DESC", (cid,)).fetchall()
+        conn.close()
+    results = []
+    for r in rows:
+        d = dict(r)
+        for k in ('participants', 'action_items'):
+            try: d[k] = json.loads(d[k]) if d[k] else []
+            except: d[k] = []
+        results.append(d)
+    return results
+
+def db_add_meeting(cid, meeting):
+    import uuid
+    mid = meeting.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute(
+            "INSERT INTO meeting_notes (id,company_id,topic,participants,decisions,action_items,summary,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (mid, cid, meeting.get('topic',''),
+             json.dumps(meeting.get('participants',[]), ensure_ascii=False),
+             meeting.get('decisions',''),
+             json.dumps(meeting.get('action_items',[]), ensure_ascii=False),
+             meeting.get('summary',''), now))
+        conn.commit()
+        conn.close()
+    return {**meeting, 'id': mid, 'created_at': now}
+
+# ─── Milestones ───
+
+def db_get_milestones(cid):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute("SELECT * FROM milestones WHERE company_id=? ORDER BY deadline, created_at", (cid,)).fetchall()
+        conn.close()
+    results = []
+    for r in rows:
+        d = dict(r)
+        try: d['linked_tasks'] = json.loads(d['linked_tasks']) if d['linked_tasks'] else []
+        except: d['linked_tasks'] = []
+        results.append(d)
+    return results
+
+def db_add_milestone(cid, ms):
+    import uuid
+    mid = ms.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute(
+            "INSERT INTO milestones (id,company_id,title,description,deadline,status,linked_tasks,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (mid, cid, ms.get('title',''), ms.get('description',''), ms.get('deadline',''),
+             ms.get('status','pending'), json.dumps(ms.get('linked_tasks',[]),ensure_ascii=False), now))
+        conn.commit()
+        conn.close()
+    return {**ms, 'id': mid, 'created_at': now}
+
+def db_update_milestone(cid, mid, updates):
+    allowed = {'title','description','deadline','status','linked_tasks'}
+    fields = {k: v for k, v in updates.items() if k in allowed}
+    if 'linked_tasks' in fields:
+        fields['linked_tasks'] = json.dumps(fields['linked_tasks'], ensure_ascii=False)
+    if not fields: return
+    set_clause = ', '.join(f"{k}=?" for k in fields)
+    with _get_lock(cid):
+        conn = _conn(cid)
+        conn.execute(f"UPDATE milestones SET {set_clause} WHERE id=? AND company_id=?", (*fields.values(), mid, cid))
+        conn.commit()
+        conn.close()
+
+def db_delete_milestone(cid, mid):
+    with _get_lock(cid):
+        conn = _conn(cid)
+        conn.execute("DELETE FROM milestones WHERE id=? AND company_id=?", (mid, cid))
+        conn.commit()
+        conn.close()
+
+# ─── Risks ───
+
+def db_get_risks(cid):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute("SELECT * FROM risks WHERE company_id=? ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC", (cid,)).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+def db_add_risk(cid, risk):
+    import uuid
+    rid = risk.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute(
+            "INSERT INTO risks (id,company_id,title,description,severity,status,owner,mitigation,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (rid, cid, risk.get('title',''), risk.get('description',''), risk.get('severity','medium'),
+             'open', risk.get('owner',''), risk.get('mitigation',''), now, now))
+        conn.commit()
+        conn.close()
+    return {**risk, 'id': rid, 'status': 'open', 'created_at': now}
+
+def db_update_risk(cid, rid, updates):
+    allowed = {'title','description','severity','status','owner','mitigation'}
+    fields = {k: v for k, v in updates.items() if k in allowed}
+    if not fields: return
+    fields['updated_at'] = datetime.utcnow().isoformat()
+    set_clause = ', '.join(f"{k}=?" for k in fields)
+    with _get_lock(cid):
+        conn = _conn(cid)
+        conn.execute(f"UPDATE risks SET {set_clause} WHERE id=? AND company_id=?", (*fields.values(), rid, cid))
+        conn.commit()
+        conn.close()
+
+def db_delete_risk(cid, rid):
+    with _get_lock(cid):
+        conn = _conn(cid)
+        conn.execute("DELETE FROM risks WHERE id=? AND company_id=?", (rid, cid))
         conn.commit()
         conn.close()
 
