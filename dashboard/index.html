@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Company Hub</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#0a0a1a;--panel:#111827;--card:#1e293b;--border:#1e3a5f;--text:#e0e0e0;--dim:#64748b;--accent:#3b82f6;--accent2:#8b5cf6;--green:#00ff88;--yellow:#fbbf24;--red:#ef4444}
@@ -261,6 +262,22 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   <!-- Center: Agent Node Graph -->
   <div class="panel" style="position:relative;min-height:80px;border-bottom:1px solid var(--border)">
     <svg id="agent-graph" width="100%" height="80" style="display:block"></svg>
+    <button onclick="openOrgChart()" style="position:absolute;top:4px;right:6px;background:rgba(30,41,59,.85);border:1px solid #334155;border-radius:5px;color:#94a3b8;font-size:10px;padding:2px 7px;cursor:pointer" title="조직도 전체 보기">⛶ 조직도</button>
+  </div>
+
+  <!-- Org Chart Overlay -->
+  <div id="org-chart-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.92);z-index:200;flex-direction:column">
+    <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #1e293b;flex-shrink:0">
+      <span style="font-size:14px;font-weight:700;color:#f1f5f9">⛶ 에이전트 조직도</span>
+      <span style="margin-left:8px;font-size:11px;color:var(--dim)">노드 클릭 → 상세 정보</span>
+      <button onclick="closeOrgChart()" style="margin-left:auto;background:#334155;border:none;border-radius:6px;color:#f1f5f9;padding:5px 14px;cursor:pointer;font-size:12px">✕ 닫기</button>
+    </div>
+    <div style="display:flex;flex:1;overflow:hidden">
+      <svg id="org-chart-svg" style="flex:1"></svg>
+      <div id="org-chart-panel" style="width:280px;background:#0f172a;border-left:1px solid #1e293b;padding:14px;overflow-y:auto;display:none">
+        <div id="org-chart-panel-content"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Center: Chat panel -->
@@ -1370,6 +1387,142 @@ function renderAgentGraph(){
 }
 const agentBusy={};
 const recentMentions=[];
+
+// ─── Org Chart (D3.js full-screen) ───
+function openOrgChart(){
+  if(!currentCompany)return;
+  const overlay=document.getElementById('org-chart-overlay');
+  overlay.style.display='flex';
+  renderOrgChart();
+}
+function closeOrgChart(){
+  document.getElementById('org-chart-overlay').style.display='none';
+  document.getElementById('org-chart-panel').style.display='none';
+}
+
+function _buildMentionEdges(chat){
+  const freq={};
+  (chat||[]).forEach(m=>{
+    if(!m.from||m.type==='user'||m.type==='system')return;
+    const fromId=m.from.toLowerCase();
+    const mentions=(m.text||'').match(/@(\w+)/g)||[];
+    mentions.forEach(t=>{
+      const toId=t.slice(1).toLowerCase();
+      const key=`${fromId}→${toId}`;
+      freq[key]=(freq[key]||0)+1;
+    });
+  });
+  return freq;
+}
+
+function renderOrgChart(){
+  const c=companies.find(x=>x.id===currentCompany);
+  if(!c)return;
+  const svgEl=document.getElementById('org-chart-svg');
+  svgEl.innerHTML='';
+  const W=svgEl.clientWidth||800,H=svgEl.clientHeight||600;
+
+  const mentionFreq=_buildMentionEdges(c.chat);
+
+  // Nodes: master + agents
+  const masterNode={id:'__master__',name:'마스터',emoji:'👤',status:'active',isMaster:true};
+  const agentNodes=(c.agents||[]).map(a=>({...a,isMaster:false}));
+  const nodes=[masterNode,...agentNodes];
+
+  // Links: master→each agent, plus inter-agent mention edges
+  const links=[
+    ...agentNodes.map(a=>({source:'__master__',target:a.id,weight:1,type:'hierarchy'}))
+  ];
+  Object.entries(mentionFreq).forEach(([key,cnt])=>{
+    const [from,to]=key.split('→');
+    if(nodes.find(n=>n.id===from)&&nodes.find(n=>n.id===to)){
+      links.push({source:from,target:to,weight:cnt,type:'mention'});
+    }
+  });
+
+  const svg=d3.select(svgEl)
+    .attr('width',W).attr('height',H);
+
+  // Zoom
+  const g=svg.append('g');
+  svg.call(d3.zoom().scaleExtent([0.3,3]).on('zoom',e=>g.attr('transform',e.transform)));
+
+  // Force simulation
+  const sim=d3.forceSimulation(nodes)
+    .force('link',d3.forceLink(links).id(d=>d.id).distance(d=>d.type==='hierarchy'?120:80))
+    .force('charge',d3.forceManyBody().strength(-300))
+    .force('center',d3.forceCenter(W/2,H/2))
+    .force('collision',d3.forceCollide(35));
+
+  // Draw links
+  const link=g.append('g').selectAll('line').data(links).join('line')
+    .attr('stroke',d=>d.type==='mention'?'#60a5fa':'#334155')
+    .attr('stroke-width',d=>d.type==='mention'?Math.min(d.weight,5):1.5)
+    .attr('stroke-dasharray',d=>d.type==='mention'?'5,3':'none')
+    .attr('stroke-opacity',0.6);
+
+  // Draw nodes
+  const node=g.append('g').selectAll('g').data(nodes).join('g')
+    .attr('cursor','pointer')
+    .on('click',(_,d)=>_orgChartNodeClick(d))
+    .call(d3.drag()
+      .on('start',(e,d)=>{if(!e.active)sim.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y})
+      .on('drag',(e,d)=>{d.fx=e.x;d.fy=e.y})
+      .on('end',(e,d)=>{if(!e.active)sim.alphaTarget(0);d.fx=null;d.fy=null}));
+
+  node.append('circle')
+    .attr('r',d=>d.isMaster?24:18)
+    .attr('fill',d=>d.isMaster?'#1e1b4b':d.status==='working'?'#78350f':d.status==='idle'?'#1e293b':'#0f2744')
+    .attr('stroke',d=>d.isMaster?'#818cf8':d.status==='working'?'#fbbf24':d.status==='active'?'#22c55e':'#475569')
+    .attr('stroke-width',2);
+
+  node.append('text').text(d=>d.emoji||'🤖')
+    .attr('text-anchor','middle').attr('dominant-baseline','middle')
+    .attr('font-size',d=>d.isMaster?18:16).attr('pointer-events','none');
+
+  node.append('text').text(d=>d.isMaster?'마스터':(d.name||d.id).substring(0,8))
+    .attr('text-anchor','middle').attr('y',d=>d.isMaster?34:28)
+    .attr('fill','#94a3b8').attr('font-size',10).attr('pointer-events','none');
+
+  // Status ring for working agents
+  node.filter(d=>d.status==='working').append('circle')
+    .attr('r',d=>d.isMaster?28:22).attr('fill','none')
+    .attr('stroke','#fbbf24').attr('stroke-width',1.5)
+    .attr('stroke-dasharray','4,3').attr('opacity',0.7);
+
+  sim.on('tick',()=>{
+    link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+        .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+    node.attr('transform',d=>`translate(${d.x},${d.y})`);
+  });
+}
+
+async function _orgChartNodeClick(d){
+  if(d.isMaster)return;
+  const panel=document.getElementById('org-chart-panel');
+  const content=document.getElementById('org-chart-panel-content');
+  panel.style.display='block';
+  content.innerHTML=`<div style="font-size:18px;margin-bottom:4px">${d.emoji||'🤖'} ${d.name}</div><div style="font-size:11px;color:var(--dim);margin-bottom:10px">${d.role||''}</div><div style="font-size:10px;color:var(--dim)">불러오는 중...</div>`;
+  // Render org chart again to resize
+  renderOrgChart();
+  try{
+    const [inboxRes,standupRes]=await Promise.all([
+      fetch(`/api/inbox/${currentCompany}/${d.id}`),
+      fetch(`/api/standup/${currentCompany}/${d.id}`)
+    ]);
+    const inbox=inboxRes.ok?await inboxRes.text():'';
+    const standup=standupRes.ok?await standupRes.text():'';
+    const statusColor=d.status==='working'?'#fbbf24':d.status==='active'?'#22c55e':'#64748b';
+    const statusLbl=d.status==='working'?'🔄 작업중':d.status==='active'?'🟢 활성':'⏳ 대기';
+    content.innerHTML=`
+      <div style="font-size:20px;margin-bottom:2px">${d.emoji||'🤖'} ${d.name}</div>
+      <div style="font-size:11px;color:${statusColor};margin-bottom:2px">${statusLbl}</div>
+      <div style="font-size:10px;color:var(--dim);margin-bottom:10px">${d.role||''}</div>
+      ${standup?`<div style="font-size:10px;font-weight:600;color:#94a3b8;margin-bottom:4px">📋 스탠드업</div><div style="font-size:10px;color:var(--text);background:var(--card);border-radius:6px;padding:6px;margin-bottom:10px;white-space:pre-wrap;max-height:120px;overflow-y:auto">${standup.substring(0,400)}</div>`:''}
+      ${inbox?`<div style="font-size:10px;font-weight:600;color:#94a3b8;margin-bottom:4px">📬 받은 메시지</div><div style="font-size:10px;color:var(--text);background:var(--card);border-radius:6px;padding:6px;white-space:pre-wrap;max-height:200px;overflow-y:auto">${inbox.substring(0,600)}</div>`:'<div style="font-size:10px;color:var(--dim)">받은 메시지 없음</div>'}
+    `;
+  }catch(e){content.innerHTML+='<br><div style="color:var(--dim);font-size:10px">로드 실패</div>';}
+}
 </script>
 </body>
 </html>
