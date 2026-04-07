@@ -3958,22 +3958,15 @@ def ensure_agents_registered():
         state_file = DATA / f"{cid}.json"
         if not state_file.exists():
             save_json(state_file, company)
-        # Fix empty workspace files on startup
+        # Warn about empty workspace files (don't auto-overwrite — may be user-customized)
         for ag in company.get('agents', []):
             ws = DATA / cid / "workspaces" / ag['id']
             if not ws.exists():
                 continue
-            needs_regen = False
-            for fname in ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'USER.md', 'HEARTBEAT.md', 'AGENTS.md']:
+            for fname in ['SOUL.md', 'IDENTITY.md', 'TOOLS.md']:
                 f = ws / fname
-                if not f.exists() or f.stat().st_size == 0:
-                    needs_regen = True
-                    break
-            if needs_regen:
-                print(f"[INIT] Regenerating workspace files for {ag['id']}...")
-                setup_agent_workspace(ws, ag['name'], ag.get('role',''),
-                                      company.get('name',''), ag.get('emoji','🤖'),
-                                      lang=company.get('lang','ko'), cid=cid)
+                if f.exists() and f.stat().st_size == 0:
+                    print(f"[WARN] {ag['id']}/{fname} is empty (0 bytes) — agent may not function correctly")
         for agent in company.get('agents', []):
             agent_id = agent.get('agent_id', '')
             if not agent_id:
