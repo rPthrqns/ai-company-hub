@@ -1140,7 +1140,7 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji, lang
     if not (agent_workspace / "IDENTITY.md").exists() or (agent_workspace / "IDENTITY.md").stat().st_size == 0:
         (agent_workspace / "IDENTITY.md").write_text(
             f"- **Name:** {name}\n- **Role:** {role}\n- **Emoji:** {emoji}\n")
-    if not (agent_workspace / "USER.md").exists():
+    if not (agent_workspace / "USER.md").exists() or (agent_workspace / "USER.md").stat().st_size == 0:
         (agent_workspace / "USER.md").write_text(
             f"# USER.md\n\n- **Name:** {_s('user.name', lang)}\n- **Role:** {_s('user.role', lang)}\n")
     if not (agent_workspace / "TOOLS.md").exists() or (agent_workspace / "TOOLS.md").stat().st_size == 0:
@@ -1155,7 +1155,7 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji, lang
             "- `[APPROVAL:category:title:detail]` Submit approval (기안서)\n"
             "  Categories: 예산,구매,프로젝트,인사,정책,기타\n"
         )
-    if not (agent_workspace / "HEARTBEAT.md").exists():
+    if not (agent_workspace / "HEARTBEAT.md").exists() or (agent_workspace / "HEARTBEAT.md").stat().st_size == 0:
         (agent_workspace / "HEARTBEAT.md").write_text(
             f"# HEARTBEAT.md\n\n{_s('heartbeat', lang)}\n")
     mem_dir = agent_workspace / "memory"
@@ -3958,12 +3958,19 @@ def ensure_agents_registered():
         state_file = DATA / f"{cid}.json"
         if not state_file.exists():
             save_json(state_file, company)
-        # Fix empty SOUL.md files on startup
+        # Fix empty workspace files on startup
         for ag in company.get('agents', []):
             ws = DATA / cid / "workspaces" / ag['id']
-            soul = ws / "SOUL.md"
-            if ws.exists() and (not soul.exists() or soul.stat().st_size == 0):
-                print(f"[INIT] Regenerating SOUL.md for {ag['id']}...")
+            if not ws.exists():
+                continue
+            needs_regen = False
+            for fname in ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'USER.md', 'HEARTBEAT.md', 'AGENTS.md']:
+                f = ws / fname
+                if not f.exists() or f.stat().st_size == 0:
+                    needs_regen = True
+                    break
+            if needs_regen:
+                print(f"[INIT] Regenerating workspace files for {ag['id']}...")
                 setup_agent_workspace(ws, ag['name'], ag.get('role',''),
                                       company.get('name',''), ag.get('emoji','🤖'),
                                       lang=company.get('lang','ko'), cid=cid)
