@@ -1570,6 +1570,11 @@ def nudge_agent(cid, text, target):
                         a['status'] = 'working'
                         break
                 update_company(cid, {"agents": c['agents']})
+            sse_broadcast('agent_thinking', {
+                'agent_id': aid, 'cid': cid,
+                'prompt_preview': prompt[:80],
+                'started_at': time.time()
+            })
             c = get_company(cid)
             for t in c.get('board_tasks', []):
                 if t.get('agent_id') == aid and t.get('status') == '대기':
@@ -1719,6 +1724,7 @@ def nudge_agent(cid, text, target):
         except Exception as e:
             print(f"[nudge] {agent_id} error: {e}")
         finally:
+            sse_broadcast('agent_done', {'agent_id': aid, 'cid': cid})
             _AGENT_BUSY.discard(key)
             _ACTIVE_SEMAPHORE.release()
             try:
