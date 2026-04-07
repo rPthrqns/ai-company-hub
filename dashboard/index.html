@@ -233,6 +233,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .emoji-opt{font-size:20px;cursor:pointer;padding:4px;border-radius:6px;transition:all .1s}
 .preset-btn{background:#1e293b;border:1px solid #334155;border-radius:6px;padding:3px 8px;font-size:10px;color:#94a3b8;cursor:pointer;transition:all .15s;white-space:nowrap}
 .preset-btn:hover{background:#253047;border-color:var(--accent);color:#e2e8f0}
+.sub-tab{background:transparent;border:none;padding:3px 6px;border-radius:4px;font-size:9px;color:var(--dim);cursor:pointer;transition:all .15s}
+.sub-tab:hover{color:var(--text)}
+.sub-tab.active{background:var(--accent);color:white}
 .emoji-opt:hover,.emoji-opt.selected{background:#253047;transform:scale(1.2)}
 .empty-state{text-align:center;padding:40px;color:var(--dim)}
 .empty-state .emoji{font-size:48px;margin-bottom:12px}
@@ -344,25 +347,35 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
       <!-- ③ 관리 탭: 결재·리스크(좌) + 마일스톤·계획(우) -->
       <div class="tab-pane" id="tab-manage" style="flex-direction:row">
         <div style="flex:1;display:flex;flex-direction:column;border-right:1px solid #1e293b;overflow:hidden">
-          <div style="padding:6px 10px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:4px">
-            <span style="font-size:10px;font-weight:600;color:var(--dim)">🔔 결재 · ⚠️ 리스크</span>
-            <button onclick="addRisk()" style="margin-left:auto;background:var(--accent);color:white;border:none;border-radius:4px;font-size:9px;padding:2px 6px;cursor:pointer">＋ 리스크</button>
+          <div style="padding:4px 8px;border-bottom:1px solid #1e293b;display:flex;gap:2px;flex-wrap:wrap">
+            <button class="sub-tab active" onclick="_switchManageSub(this,'m-approvals')">📋 기안</button>
+            <button class="sub-tab" onclick="_switchManageSub(this,'m-risk')">⚠️ 리스크</button>
+            <button class="sub-tab" onclick="_switchManageSub(this,'m-announce')">📢 공지</button>
+            <button class="sub-tab" onclick="_switchManageSub(this,'m-audit')">🔍 감사</button>
+            <button onclick="addRisk()" style="margin-left:auto;background:var(--accent);color:white;border:none;border-radius:3px;font-size:8px;padding:2px 5px;cursor:pointer">＋</button>
           </div>
           <div style="flex:1;overflow-y:auto;padding:8px">
-            <div id="approvals-panel"><div style="padding:12px;color:var(--dim);font-size:11px;text-align:center">🔔 대기 중인 결재가 없습니다</div></div>
-            <div style="margin-top:8px;border-top:1px solid #1e293b;padding-top:8px" id="risk-panel"></div>
+            <div id="m-approvals"><div id="approvals-panel"></div></div>
+            <div id="m-risk" style="display:none"><div id="risk-panel"></div></div>
+            <div id="m-announce" style="display:none"><div id="announce-panel"></div></div>
+            <div id="m-audit" style="display:none"><div id="audit-panel"></div></div>
           </div>
         </div>
         <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
-          <div style="padding:6px 10px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:4px">
-            <span style="font-size:10px;font-weight:600;color:var(--dim)">🚩 마일스톤 · 📋 계획</span>
-            <button onclick="addMilestone()" style="margin-left:auto;background:var(--accent);color:white;border:none;border-radius:4px;font-size:9px;padding:2px 6px;cursor:pointer">＋ 마일스톤</button>
-            <button onclick="addPlanTask(null)" style="background:var(--accent);color:white;border:none;border-radius:4px;font-size:9px;padding:2px 6px;cursor:pointer">＋ 계획</button>
-            <button onclick="saveSnapshot()" style="background:#1e293b;border:1px solid #334155;border-radius:4px;color:var(--dim);font-size:9px;padding:2px 6px;cursor:pointer">📸</button>
+          <div style="padding:4px 8px;border-bottom:1px solid #1e293b;display:flex;gap:2px;flex-wrap:wrap">
+            <button class="sub-tab active" onclick="_switchManageRight(this,'m-milestone')">🚩 마일스톤</button>
+            <button class="sub-tab" onclick="_switchManageRight(this,'m-plan')">📋 계획</button>
+            <button class="sub-tab" onclick="_switchManageRight(this,'m-policy')">📜 사규</button>
+            <button class="sub-tab" onclick="_switchManageRight(this,'m-budget')">💵 예산</button>
+            <button class="sub-tab" onclick="_switchManageRight(this,'m-vote')">🗳️ 투표</button>
+            <button onclick="addMilestone()" style="margin-left:auto;background:var(--accent);color:white;border:none;border-radius:3px;font-size:8px;padding:2px 5px;cursor:pointer">＋</button>
           </div>
           <div style="flex:1;overflow-y:auto;padding:8px">
-            <div id="milestone-panel"></div>
-            <div style="margin-top:8px;border-top:1px solid #1e293b;padding-top:8px" id="plan-task-tree"></div>
+            <div id="m-milestone"><div id="milestone-panel"></div></div>
+            <div id="m-plan" style="display:none"><div id="plan-task-tree"></div></div>
+            <div id="m-policy" style="display:none"><div id="policy-panel"></div></div>
+            <div id="m-budget" style="display:none"><div id="budget-panel"></div></div>
+            <div id="m-vote" style="display:none"><div id="vote-panel"></div></div>
           </div>
         </div>
       </div>
@@ -377,12 +390,17 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
           <div id="kpi-panel" style="flex:1;overflow-y:auto;padding:8px"></div>
         </div>
         <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
-          <div style="padding:6px 10px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:4px">
-            <span style="font-size:10px;font-weight:600;color:var(--dim)">📊 리포트 / 브리핑</span>
-            <button onclick="startDailyReport()" style="margin-left:auto;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:4px;font-size:9px;padding:2px 6px;cursor:pointer">📊 데일리 설정</button>
-            <button onclick="refreshReport()" style="background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:4px;font-size:9px;padding:2px 6px;cursor:pointer">🔄</button>
+          <div style="padding:4px 8px;border-bottom:1px solid #1e293b;display:flex;gap:2px">
+            <button class="sub-tab active" onclick="_switchAnalRight(this,'a-report')">📊 리포트</button>
+            <button class="sub-tab" onclick="_switchAnalRight(this,'a-crm')">👥 CRM</button>
+            <button onclick="startDailyReport()" style="margin-left:auto;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:3px;font-size:8px;padding:2px 5px;cursor:pointer">📊 데일리</button>
+            <button onclick="refreshReport()" style="background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:3px;font-size:8px;padding:2px 5px;cursor:pointer">🔄</button>
+            <button onclick="generateReport('weekly')" style="background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:3px;font-size:8px;padding:2px 5px;cursor:pointer">📝 주간</button>
           </div>
-          <div id="report-panel" style="flex:1;overflow-y:auto;padding:8px;font-size:11px;color:var(--text);white-space:pre-wrap;line-height:1.6"><div style="color:var(--dim);text-align:center;padding:20px">리포트 탭 클릭 시 최신 브리핑 로드</div></div>
+          <div style="flex:1;overflow-y:auto;padding:8px">
+            <div id="a-report"><div id="report-panel" style="font-size:11px;color:var(--text);white-space:pre-wrap;line-height:1.6"><div style="color:var(--dim);text-align:center;padding:20px">리포트 클릭 시 로드</div></div></div>
+            <div id="a-crm" style="display:none"><div id="crm-panel"></div></div>
+          </div>
         </div>
       </div>
       <!-- ⑤ 자료 탭: 위키(좌) + 결과물·정기(우) -->
@@ -1035,55 +1053,70 @@ function renderApprovals(){
   _updateApprovalBadge();
   const banner=document.getElementById('approval-banner');
   const panel=document.getElementById('approvals-panel');
-  // Filter out stale/empty approvals
-  if(cachedApprovals)cachedApprovals=cachedApprovals.filter(a=>a.detail&&a.detail.trim());
-  if(!cachedApprovals||!cachedApprovals.length){
+  if(cachedApprovals)cachedApprovals=cachedApprovals.filter(a=>(a.detail&&a.detail.trim())||(a.title&&a.title.trim()));
+  const pending=cachedApprovals?cachedApprovals.filter(a=>a.status==='pending'):[];
+  if(!pending.length){
     banner.style.display='none';
-    if(panel)panel.innerHTML='<div style="padding:20px;color:var(--dim);font-size:11px;text-align:center">🔔 대기 중인 결재가 없습니다</div>';
+    if(panel)panel.innerHTML='<div style="padding:12px;color:var(--dim);font-size:11px;text-align:center">📋 대기 중인 기안이 없습니다</div>';
     updateMainHeight();return;
   }
+  // Banner: compact notification
   banner.style.display='flex';
-  let html='';
-  cachedApprovals.forEach(a=>{
-    const time=a.time&&!isNaN(new Date(a.time).getTime())?new Date(a.time).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):a.time||'';
-    html+=`<span class="ab-icon">⚠️</span><div class="ab-text"><strong>${t('approvalReq')}</strong> · ${(a.detail||a.type).substring(0,80)}${(a.detail||'').length>80?'...':''} <span style="opacity:.6">${time}</span></div><div class="ab-actions"><button class="ab-btn approve" onclick="resolveApproval('${a.id}','approved')">✅ ${t('approve')}</button><button class="ab-btn reject" onclick="resolveApproval('${a.id}','rejected')">❌ ${t('reject')}</button></div>`;
-  });
-  banner.innerHTML=html;
-  // Also render in panel
+  banner.innerHTML=`<span class="ab-icon">📋</span><div class="ab-text"><strong>기안 ${pending.length}건</strong> 결재 대기 중</div><div class="ab-actions"><button class="ab-btn approve" onclick="switchCenterTab('manage')">확인</button></div>`;
+  // Panel: full approval cards
   if(panel){
-    let phtml='<div style="padding:6px 0">';
-    cachedApprovals.forEach(a=>{
-      const time=a.time&&!isNaN(new Date(a.time).getTime())?new Date(a.time).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):a.time||'';
-      phtml+=`<div style="background:var(--card);border-radius:8px;padding:8px 10px;margin-bottom:6px;border-left:3px solid var(--yellow)"><div style="font-size:10px;color:var(--dim);margin-bottom:2px">${a.from_agent||''} ${a.from_emoji||''} · ${time}</div><div style="font-size:11px;font-weight:600;color:#fcd34d;margin-bottom:4px">${a.type||'요청'}</div><div style="font-size:9px;color:var(--dim);margin-bottom:2px">📝 계획 내용 (수정 가능)</div><textarea id="plan-${a.id}" style="width:100%;box-sizing:border-box;background:#0f172a;color:var(--text);border:1px solid #4b5563;border-radius:4px;padding:6px 8px;font-size:11px;resize:vertical;min-height:80px;margin-bottom:4px;font-family:inherit;white-space:pre-wrap">${(a.detail||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea><textarea id="apr-${a.id}" placeholder="추가 지시사항 (선택)..." style="width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid #374151;border-radius:4px;padding:6px 8px;font-size:11px;resize:vertical;min-height:32px;margin-bottom:4px;font-family:inherit"></textarea><div style="display:flex;gap:4px"><button onclick="resolveApproval('${a.id}','approved')" style="background:#064e3b;color:#6ee7b7;border:none;padding:4px 12px;border-radius:4px;font-size:10px;cursor:pointer">✅ 승인·전달</button><button onclick="resolveApproval('${a.id}','rejected')" style="background:#7f1d1d;color:#fca5a5;border:none;padding:4px 12px;border-radius:4px;font-size:10px;cursor:pointer">❌ 반려</button></div></div>`;
+    const catIcon={예산:'💰',구매:'🛒',프로젝트:'📁',인사:'👥',정책:'📜',기타:'📎',general:'📋',budget:'💰',purchase:'🛒',project:'📁',hr:'👥',policy:'📜'};
+    const statusColor={pending:'#fbbf24',approved:'#22c55e',rejected:'#ef4444',revision:'#60a5fa',draft:'#64748b'};
+    const statusLabel={pending:'⏳ 결재 대기',approved:'✅ 승인',rejected:'❌ 반려',revision:'🔄 수정요청',draft:'📝 작성중'};
+    let html='';
+    // Show all (pending first, then recent resolved)
+    const all=[...pending,...(cachedApprovals||[]).filter(a=>a.status!=='pending').slice(0,5)];
+    all.forEach(a=>{
+      const cat=catIcon[a.category]||'📋';
+      const sc=statusColor[a.status]||'#64748b';
+      const sl=statusLabel[a.status]||a.status;
+      const line=a.approval_line?JSON.parse(a.approval_line||'[]'):[];
+      const step=a.current_step||0;
+      const time=a.time||'';
+      const isPending=a.status==='pending';
+      html+=`<div style="background:var(--card);border-radius:10px;padding:10px;margin-bottom:6px;border-left:3px solid ${sc}">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <span style="font-size:14px">${cat}</span>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600;color:#e2e8f0">${_esc(a.title||a.approval_type||'기안')}</div>
+            <div style="font-size:9px;color:var(--dim)">${_esc(a.from_emoji||'')} ${_esc(a.from_agent||'')} · ${time}${a.amount?` · 금액: ${_esc(a.amount)}`:''}</div>
+          </div>
+          <span style="font-size:9px;color:${sc};font-weight:600">${sl}</span>
+        </div>
+        ${line.length?`<div style="display:flex;align-items:center;gap:2px;margin-bottom:6px;font-size:9px">${line.map((l,i)=>`<span style="padding:2px 6px;border-radius:10px;${i<step?'background:#064e3b;color:#6ee7b7':i===step?'background:#1e3a5f;color:#60a5fa;font-weight:600':'background:#1e293b;color:var(--dim)'}">${l==='master'?'👤 마스터':_esc(l.toUpperCase())}</span>${i<line.length-1?'<span style="color:var(--dim)">→</span>':''}`).join('')}</div>`:''}
+        <div style="font-size:10px;color:var(--text);white-space:pre-wrap;background:var(--bg);border-radius:6px;padding:6px;margin-bottom:4px;max-height:120px;overflow-y:auto">${_esc((a.detail||'').substring(0,500))}</div>
+        ${isPending?`<textarea id="apr-${a.id}" placeholder="의견/지시사항 (선택)..." style="width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid #374151;border-radius:4px;padding:4px 8px;font-size:10px;resize:vertical;min-height:28px;margin-bottom:4px;font-family:inherit"></textarea>
+        <div style="display:flex;gap:4px">
+          <button onclick="resolveApproval('${a.id}','approved')" style="background:#064e3b;color:#6ee7b7;border:none;padding:4px 12px;border-radius:4px;font-size:10px;cursor:pointer">✅ 승인</button>
+          <button onclick="resolveApproval('${a.id}','rejected')" style="background:#7f1d1d;color:#fca5a5;border:none;padding:4px 12px;border-radius:4px;font-size:10px;cursor:pointer">❌ 반려</button>
+          <button onclick="resolveApproval('${a.id}','revision')" style="background:#1e3a5f;color:#93c5fd;border:none;padding:4px 12px;border-radius:4px;font-size:10px;cursor:pointer">🔄 수정요청</button>
+        </div>`:''}
+      </div>`;
     });
-    phtml+='</div>';
-    panel.innerHTML=phtml;
+    panel.innerHTML=html||'<div style="padding:12px;color:var(--dim);font-size:11px;text-align:center">📋 기안이 없습니다</div>';
   }
   updateMainHeight();
 }
 
 async function resolveApproval(aprId,resolution){
   try{
-    const planEl=document.getElementById('plan-'+aprId);
     const responseEl=document.getElementById('apr-'+aprId);
-    const editedPlan=planEl?planEl.value.trim():'';
-    const extraNote=responseEl?responseEl.value.trim():'';
-    // Combine edited plan + extra note into response sent to agent
-    let responseText='';
-    if(resolution==='approved'){
-      responseText=editedPlan?`[수정된 계획]\n${editedPlan}${extraNote?'\n\n[추가 지시]\n'+extraNote:''}`:extraNote;
-    }else{
-      responseText=extraNote;
-    }
-    const res=await fetch(`/api/approval-${resolution==='approved'?'approve':'reject'}/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:aprId,response:responseText})});
+    const responseText=responseEl?responseEl.value.trim():'';
+    const endpoint=resolution==='rejected'?'reject':'approve';
+    const res=await fetch(`/api/approval-${endpoint}/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:aprId,response:responseText,resolution})});
     const data=await res.json();
     if(data.ok){
-      toast(resolution==='approved'?'✅ 제출되었습니다':'❌ 반려되었습니다');
-      if(resolution==='approved'){const rev=parseFloat(localStorage.getItem('revenue-'+currentCompany)||'0')+Math.random()*5+1;localStorage.setItem('revenue-'+currentCompany,rev.toFixed(2));renderCosts();}
-      cachedApprovals=cachedApprovals.filter(a=>a.id!==aprId);
+      const labels={approved:'✅ 승인됨',rejected:'❌ 반려됨',revision:'🔄 수정 요청됨'};
+      toast(labels[resolution]||'처리됨');
+      // Update local cache
+      const idx=(cachedApprovals||[]).findIndex(a=>a.id===aprId);
+      if(idx>=0)cachedApprovals[idx].status=resolution==='revision'?'revision':resolution;
       renderApprovals();
-      // Refresh company data since approval might change things
-      refreshCompany();
     }
   }catch(e){toast('처리 실패')}
 }
@@ -1674,6 +1707,140 @@ async function deleteMilestone(mid){
   toast('🗑 삭제됨');renderMilestones();
 }
 
+// ─── Sub-tab Switching ───
+function _switchManageSub(btn,id){
+  btn.parentElement.querySelectorAll('.sub-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  ['m-approvals','m-risk','m-announce','m-audit'].forEach(s=>{const el=document.getElementById(s);if(el)el.style.display=s===id?'block':'none';});
+  if(id==='m-risk')renderRisks();
+  if(id==='m-announce')renderAnnouncements();
+  if(id==='m-audit')renderAudit();
+}
+function _switchManageRight(btn,id){
+  btn.parentElement.querySelectorAll('.sub-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  ['m-milestone','m-plan','m-policy','m-budget','m-vote'].forEach(s=>{const el=document.getElementById(s);if(el)el.style.display=s===id?'block':'none';});
+  if(id==='m-milestone')renderMilestones();
+  if(id==='m-plan')renderPlanTaskTree();
+  if(id==='m-policy')renderPolicies();
+  if(id==='m-budget')renderBudgets();
+  if(id==='m-vote')renderVotes();
+}
+
+// ─── Announcements ───
+async function renderAnnouncements(){
+  const panel=document.getElementById('announce-panel');
+  if(!panel||!currentCompany)return;
+  try{
+    const res=await fetch(`/api/announcements/${currentCompany}`);
+    const list=await res.json();
+    if(!list.length){panel.innerHTML='<div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">📢 공지사항이 없습니다</div><button onclick="addAnnouncement()" style="display:block;margin:8px auto;background:var(--accent);color:white;border:none;border-radius:5px;font-size:10px;padding:4px 12px;cursor:pointer">＋ 공지 작성</button>';return;}
+    panel.innerHTML=`<button onclick="addAnnouncement()" style="margin-bottom:8px;background:var(--accent);color:white;border:none;border-radius:5px;font-size:10px;padding:4px 12px;cursor:pointer">＋ 새 공지</button>`+list.map(a=>`<div style="background:var(--card);border-radius:8px;padding:8px;margin-bottom:4px;border-left:3px solid ${a.pinned?'#fbbf24':'#334155'}">
+      <div style="display:flex;justify-content:space-between;font-size:11px;font-weight:600;color:#e2e8f0">${a.pinned?'📌 ':''}${_esc(a.title)}<button onclick="deleteAnnouncement('${a.id}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:9px">✕</button></div>
+      <div style="font-size:10px;color:var(--text);margin-top:4px;white-space:pre-wrap">${_esc(a.content?.substring(0,200)||'')}</div>
+      <div style="font-size:8px;color:var(--dim);margin-top:4px">${_esc(a.author||'')} · ${a.created_at?.slice(0,16)||''}</div>
+    </div>`).join('');
+  }catch(e){panel.innerHTML=`<div style="color:var(--red);font-size:11px">오류</div>`;}
+}
+function addAnnouncement(){const title=prompt('공지 제목:');if(!title)return;const content=prompt('내용:','');fetch(`/api/announcement-add/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content,author:'마스터',pinned:false})}).then(()=>{toast('📢 공지 등록됨');renderAnnouncements();});}
+function deleteAnnouncement(id){if(!confirm('삭제?'))return;fetch(`/api/announcement/${currentCompany}/${id}`,{method:'DELETE'}).then(()=>{toast('삭제됨');renderAnnouncements();});}
+
+// ─── Audit Log ───
+async function renderAudit(){
+  const panel=document.getElementById('audit-panel');
+  if(!panel||!currentCompany)return;
+  try{
+    const res=await fetch(`/api/audit/${currentCompany}`);
+    const list=await res.json();
+    if(!list.length){panel.innerHTML='<div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">🔍 감사 로그가 없습니다</div>';return;}
+    panel.innerHTML=list.map(a=>`<div style="display:flex;gap:6px;padding:3px 0;border-bottom:1px solid #0f172a;font-size:9px">
+      <span style="color:var(--dim);min-width:55px">${a.created_at?.slice(5,16).replace('T',' ')||''}</span>
+      <span style="color:#60a5fa;min-width:50px">${_esc(a.actor||'')}</span>
+      <span style="color:#fbbf24;min-width:60px">${_esc(a.action||'')}</span>
+      <span style="color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(a.detail||'')}</span>
+    </div>`).join('');
+  }catch(e){panel.innerHTML='<div style="color:var(--red);font-size:11px">오류</div>';}
+}
+
+// ─── Policies ───
+async function renderPolicies(){
+  const panel=document.getElementById('policy-panel');
+  if(!panel||!currentCompany)return;
+  try{
+    const res=await fetch(`/api/policies/${currentCompany}`);
+    const list=await res.json();
+    if(!list.length){panel.innerHTML='<div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">📜 등록된 사규가 없습니다</div><button onclick="addPolicy()" style="display:block;margin:8px auto;background:var(--accent);color:white;border:none;border-radius:5px;font-size:10px;padding:4px 12px;cursor:pointer">＋ 사규 추가</button>';return;}
+    panel.innerHTML=`<button onclick="addPolicy()" style="margin-bottom:8px;background:var(--accent);color:white;border:none;border-radius:5px;font-size:10px;padding:4px 12px;cursor:pointer">＋ 사규 추가</button>`+list.map(p=>`<div style="background:var(--card);border-radius:8px;padding:8px;margin-bottom:4px">
+      <div style="display:flex;justify-content:space-between"><span style="font-size:11px;font-weight:600;color:#e2e8f0">📜 ${_esc(p.title)}</span><button onclick="deletePolicy('${p.id}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:9px">✕</button></div>
+      <div style="font-size:9px;color:var(--dim)">${_esc(p.category||'')} · 시행일: ${p.effective_date||'즉시'}</div>
+      <div style="font-size:10px;color:var(--text);margin-top:4px;white-space:pre-wrap">${_esc(p.content?.substring(0,200)||'')}</div>
+    </div>`).join('');
+  }catch(e){panel.innerHTML='<div style="color:var(--red);font-size:11px">오류</div>';}
+}
+function addPolicy(){const title=prompt('사규/정책 제목:');if(!title)return;const content=prompt('내용:','');const cat=prompt('분류 (근무/보안/행동/일반):','일반');fetch(`/api/policy-add/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,content,category:cat,author:'마스터'})}).then(()=>{toast('📜 사규 등록됨');renderPolicies();});}
+function deletePolicy(id){if(!confirm('삭제?'))return;fetch(`/api/policy/${currentCompany}/${id}`,{method:'DELETE'}).then(()=>{toast('삭제됨');renderPolicies();});}
+
+// ─── Budgets ───
+async function renderBudgets(){
+  const panel=document.getElementById('budget-panel');
+  if(!panel||!currentCompany)return;
+  try{
+    const [budRes,compRes]=await Promise.all([fetch(`/api/budgets/${currentCompany}`),fetch(`/api/company/${currentCompany}`)]);
+    const budgets=await budRes.json();const comp=await compRes.json();
+    const agents=comp.agents||[];
+    let html='<button onclick="setBudget()" style="margin-bottom:8px;background:var(--accent);color:white;border:none;border-radius:5px;font-size:10px;padding:4px 12px;cursor:pointer">💵 예산 배분</button>';
+    if(!budgets.length){html+='<div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">💵 배분된 예산이 없습니다</div>';}
+    else{
+      const totalAlloc=budgets.reduce((s,b)=>s+b.allocated,0);
+      const totalSpent=budgets.reduce((s,b)=>s+b.spent,0);
+      html+=`<div style="background:var(--card);border-radius:8px;padding:8px;margin-bottom:8px;display:flex;justify-content:space-around;text-align:center">
+        <div><div style="font-size:14px;font-weight:700;color:#60a5fa">$${totalAlloc.toFixed(2)}</div><div style="font-size:8px;color:var(--dim)">총 배분</div></div>
+        <div><div style="font-size:14px;font-weight:700;color:#f87171">$${totalSpent.toFixed(4)}</div><div style="font-size:8px;color:var(--dim)">집행</div></div>
+        <div><div style="font-size:14px;font-weight:700;color:#22c55e">$${(totalAlloc-totalSpent).toFixed(2)}</div><div style="font-size:8px;color:var(--dim)">잔여</div></div>
+      </div>`;
+      budgets.forEach(b=>{const pct=b.allocated?Math.round(b.spent/b.allocated*100):0;const agent=agents.find(a=>a.id===b.agent_id);
+        html+=`<div style="background:var(--card);border-radius:6px;padding:6px 8px;margin-bottom:4px;display:flex;align-items:center;gap:6px">
+          <span style="font-size:12px">${agent?.emoji||'📁'}</span>
+          <div style="flex:1"><div style="font-size:10px;color:#e2e8f0">${_esc(b.department||agent?.name||b.agent_id)}</div>
+          <div style="height:4px;background:#1e293b;border-radius:2px;margin-top:2px"><div style="height:100%;background:${pct>90?'#ef4444':pct>70?'#fbbf24':'#22c55e'};width:${Math.min(pct,100)}%;border-radius:2px"></div></div></div>
+          <div style="text-align:right;font-size:8px;color:var(--dim)">${pct}%<br>$${b.spent.toFixed(4)}/$${b.allocated.toFixed(2)}</div>
+        </div>`;});
+    }
+    panel.innerHTML=html;
+  }catch(e){panel.innerHTML='<div style="color:var(--red);font-size:11px">오류</div>';}
+}
+function setBudget(){const c=companies.find(x=>x.id===currentCompany);if(!c)return;const agent=prompt('에이전트 (ceo/cmo/cto 등):');if(!agent)return;const amount=parseFloat(prompt('배분 금액 ($):','1.00'));if(isNaN(amount))return;fetch(`/api/budget-set/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent_id:agent,department:agent.toUpperCase(),allocated:amount,spent:0})}).then(()=>{toast('💵 예산 배분됨');renderBudgets();});}
+
+// ─── Votes ───
+async function renderVotes(){
+  const panel=document.getElementById('vote-panel');
+  if(!panel||!currentCompany)return;
+  try{
+    const res=await fetch(`/api/votes/${currentCompany}`);
+    const list=await res.json();
+    if(!list.length){panel.innerHTML='<div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">🗳️ 진행 중인 투표가 없습니다</div><button onclick="createVote()" style="display:block;margin:8px auto;background:var(--accent);color:white;border:none;border-radius:5px;font-size:10px;padding:4px 12px;cursor:pointer">＋ 투표 만들기</button>';return;}
+    panel.innerHTML=`<button onclick="createVote()" style="margin-bottom:8px;background:var(--accent);color:white;border:none;border-radius:5px;font-size:10px;padding:4px 12px;cursor:pointer">＋ 투표 만들기</button>`+list.map(v=>{
+      const totalVotes=Object.values(v.results||{}).reduce((s,n)=>s+n,0);
+      return `<div style="background:var(--card);border-radius:8px;padding:8px;margin-bottom:6px">
+        <div style="font-size:11px;font-weight:600;color:#e2e8f0;margin-bottom:4px">🗳️ ${_esc(v.title)} <span style="font-size:8px;color:${v.status==='open'?'#22c55e':'#64748b'}">${v.status==='open'?'진행중':'마감'}</span></div>
+        ${v.description?`<div style="font-size:9px;color:var(--dim);margin-bottom:4px">${_esc(v.description)}</div>`:''}
+        ${(v.options||[]).map(opt=>{const cnt=(v.results||{})[opt]||0;const pct=totalVotes?Math.round(cnt/totalVotes*100):0;
+          return `<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+            ${v.status==='open'?`<button onclick="castVote('${v.id}','${_esc(opt)}')" style="background:#1e293b;border:1px solid #334155;border-radius:4px;color:#60a5fa;font-size:8px;padding:1px 5px;cursor:pointer">투표</button>`:''}
+            <div style="flex:1;height:16px;background:#1e293b;border-radius:3px;overflow:hidden;position:relative">
+              <div style="height:100%;background:#3b82f6;width:${pct}%;border-radius:3px"></div>
+              <span style="position:absolute;left:4px;top:1px;font-size:9px;color:#e2e8f0">${_esc(opt)}</span>
+              <span style="position:absolute;right:4px;top:1px;font-size:8px;color:var(--dim)">${cnt}표 (${pct}%)</span>
+            </div>
+          </div>`;}).join('')}
+        <div style="font-size:8px;color:var(--dim);margin-top:2px">${totalVotes}명 참여 · ${(v.voters||[]).length}명</div>
+      </div>`;
+    }).join('');
+  }catch(e){panel.innerHTML='<div style="color:var(--red);font-size:11px">오류</div>';}
+}
+function createVote(){const title=prompt('투표 제목:');if(!title)return;const opts=prompt('선택지 (쉼표 구분):','찬성,반대');if(!opts)return;fetch(`/api/vote-add/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,options:opts.split(',').map(s=>s.trim()),author:'마스터'})}).then(()=>{toast('🗳️ 투표 생성됨');renderVotes();});}
+function castVote(vid,choice){fetch(`/api/vote-cast/${currentCompany}/${vid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({voter:'마스터',choice})}).then(r=>r.json()).then(d=>{if(d.ok)toast('투표 완료');else toast('이미 투표함');renderVotes();});}
+
 // ─── Risks ───
 async function renderRisks(){
   const panel=document.getElementById('risk-panel');
@@ -1823,6 +1990,59 @@ async function onboardAgent(aid){
     else toastDone(t,'온보딩 실패');
   }catch(e){toastDone(t,'오류')}
 }
+
+// ─── Analytics Sub-tab ───
+function _switchAnalRight(btn,id){
+  btn.parentElement.querySelectorAll('.sub-tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  ['a-report','a-crm'].forEach(s=>{const el=document.getElementById(s);if(el)el.style.display=s===id?'block':'none';});
+  if(id==='a-report')refreshReport();
+  if(id==='a-crm')renderCRM();
+}
+async function generateReport(type){
+  const t=toastLoading(`📝 ${type==='weekly'?'주간':'월간'} 보고서 생성 중...`);
+  try{
+    const res=await fetch(`/api/report-generate/${currentCompany}/${type}`,{method:'POST'});
+    const data=await res.json();
+    if(data.ok){toastDone(t,'📝 보고서 생성 완료');refreshReport();}
+  }catch(e){toastDone(t,'오류');}
+}
+
+// ─── CRM ───
+async function renderCRM(){
+  const panel=document.getElementById('crm-panel');
+  if(!panel||!currentCompany)return;
+  try{
+    const res=await fetch(`/api/crm/${currentCompany}`);
+    const list=await res.json();
+    const statusIcon={lead:'🔵',prospect:'🟡',customer:'🟢',churned:'🔴',partner:'🟣'};
+    const statusLabel={lead:'리드',prospect:'잠재',customer:'고객',churned:'이탈',partner:'파트너'};
+    let html=`<button onclick="addContact()" style="margin-bottom:8px;background:var(--accent);color:white;border:none;border-radius:5px;font-size:10px;padding:4px 12px;cursor:pointer">＋ 고객 추가</button>`;
+    if(!list.length){html+='<div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">👥 등록된 고객이 없습니다</div>';}
+    // Group by status
+    const grouped={};list.forEach(c=>{const s=c.status||'lead';if(!grouped[s])grouped[s]=[];grouped[s].push(c);});
+    Object.entries(grouped).forEach(([status,contacts])=>{
+      html+=`<div style="font-size:9px;font-weight:600;color:var(--dim);margin:8px 0 4px">${statusIcon[status]||'⚪'} ${statusLabel[status]||status} (${contacts.length})</div>`;
+      contacts.forEach(c=>{
+        html+=`<div style="background:var(--card);border-radius:6px;padding:6px 8px;margin-bottom:3px;display:flex;align-items:center;gap:6px">
+          <div style="flex:1">
+            <div style="font-size:10px;font-weight:600;color:#e2e8f0">${_esc(c.name)}${c.company_name?` · <span style="color:var(--dim)">${_esc(c.company_name)}</span>`:''}</div>
+            <div style="font-size:8px;color:var(--dim)">${_esc(c.email||'')} ${c.phone?'· '+_esc(c.phone):''} ${c.owner?'· 담당: '+_esc(c.owner):''}</div>
+            ${c.notes?`<div style="font-size:8px;color:#94a3b8;margin-top:1px">${_esc(c.notes.substring(0,80))}</div>`:''}
+          </div>
+          <select onchange="updateContactStatus('${c.id}',this.value)" style="background:var(--bg);border:1px solid #334155;border-radius:3px;color:var(--text);font-size:8px;padding:1px 3px">
+            ${Object.entries(statusLabel).map(([k,v])=>`<option value="${k}" ${c.status===k?'selected':''}>${v}</option>`).join('')}
+          </select>
+          <button onclick="deleteContact('${c.id}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:9px">✕</button>
+        </div>`;
+      });
+    });
+    panel.innerHTML=html;
+  }catch(e){panel.innerHTML='<div style="color:var(--red);font-size:11px">오류</div>';}
+}
+function addContact(){const name=prompt('고객명:');if(!name)return;const email=prompt('이메일:','');const company=prompt('회사명:','');const status=prompt('상태 (lead/prospect/customer/partner):','lead');fetch(`/api/crm-add/${currentCompany}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,company_name:company,status,owner:'마스터'})}).then(()=>{toast('👥 고객 추가됨');renderCRM();});}
+function updateContactStatus(cid,status){fetch(`/api/crm-update/${currentCompany}/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})}).then(()=>renderCRM());}
+function deleteContact(cid){if(!confirm('삭제?'))return;fetch(`/api/crm/${currentCompany}/${cid}`,{method:'DELETE'}).then(()=>{toast('삭제됨');renderCRM();});}
 
 // ─── Daily Report / Briefing ───
 async function refreshReport(){

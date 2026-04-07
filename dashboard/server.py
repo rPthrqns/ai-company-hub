@@ -26,7 +26,14 @@ from db import (init_db, migrate_from_json, db_get_company, db_save_company, db_
                db_get_wiki_pages, db_get_wiki_page, db_save_wiki_page, db_delete_wiki_page,
                db_get_meetings, db_add_meeting,
                db_get_milestones, db_add_milestone, db_update_milestone, db_delete_milestone,
-               db_get_risks, db_add_risk, db_update_risk, db_delete_risk)
+               db_get_risks, db_add_risk, db_update_risk, db_delete_risk,
+               db_get_announcements, db_add_announcement, db_delete_announcement,
+               db_get_journals, db_add_journal,
+               db_get_policies, db_add_policy, db_delete_policy,
+               db_get_budgets, db_set_budget,
+               db_get_votes, db_add_vote, db_cast_vote,
+               db_add_audit, db_get_audit,
+               db_get_contacts, db_add_contact, db_delete_contact)
 
 # ─── Constants ───
 PORT = 3000
@@ -236,6 +243,34 @@ def process_task_commands(cid, text, agent_id):
     
     if any('CRON' in r for r in results):
         print(f"[cron_cmds] {agent_id}: {'; '.join(results)}")
+
+    # APPROVAL 명령: [APPROVAL:카테고리:제목:내용] 또는 [APPROVAL:제목:내용]
+    for m in re.finditer(r'\[APPROVAL:([^:\]]+):([^:\]]+)(?::([^\]]*))?\]', text):
+        parts = [m.group(1).strip(), m.group(2).strip(), (m.group(3) or '').strip()]
+        if len(parts[0]) <= 10 and parts[0] in ('예산','구매','프로젝트','인사','정책','기타','budget','purchase','project','hr','policy','general'):
+            cat, title, detail = parts[0], parts[1], parts[2]
+        else:
+            cat, title, detail = 'general', parts[0], parts[1]
+        company = get_company(cid)
+        agent = next((a for a in company.get('agents',[]) if a['id']==agent_id), None) if company else None
+        agent_name = agent.get('name','') if agent else agent_id
+        agent_emoji = agent.get('emoji','🤖') if agent else '🤖'
+        # Build approval line: agent → CEO → master
+        approval_line = [agent_id]
+        if agent_id != 'ceo':
+            approval_line.append('ceo')
+        approval_line.append('master')
+        approval = {
+            'id': str(uuid.uuid4())[:8], 'from_agent': agent_name, 'from_emoji': agent_emoji,
+            'approval_type': '기안', 'category': cat, 'title': title, 'detail': detail,
+            'approval_line': json.dumps(approval_line), 'current_step': 0,
+            'status': 'pending', 'time': datetime.now().strftime('%H:%M'),
+            'created_at': datetime.now().isoformat(), 'updated_at': datetime.now().isoformat(),
+            'comments': '[]'
+        }
+        append_approval(cid, approval)
+        results.append(f"📋 기안 '{title}' 제출됨 (결재라인: {' → '.join(approval_line)})")
+        print(f"[approval] {agent_id} submitted: {cat}/{title}")
     
     # 자동 작업 감지: [TASK_XXX] 명령이 없을 때 패턴 기반 자동 추가
     has_task_cmd = bool(re.search(r'\[TASK_', text))
@@ -1083,7 +1118,8 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji, lang
         whiteboard_path = DATA / cid / "_shared" / "whiteboard.md"
         deliverables_path = DATA / cid / "_shared" / "deliverables"
         shared_path = DATA / cid / "_shared"
-    if not (agent_workspace / "SOUL.md").exists():
+    soul_file = agent_workspace / "SOUL.md"
+    if not soul_file.exists() or soul_file.stat().st_size == 0:
         (agent_workspace / "SOUL.md").write_text(
             f"# SOUL.md\n{_s('role.intro', lang, company=company_name, name=name, role=role)}\n"
             f"{_s('role.report', lang)}\n{_s('speak.lang', lang)}\n"
@@ -1101,13 +1137,13 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji, lang
             f"- Whiteboard: {whiteboard_path}\n"
             if cid else ""
         )
-    if not (agent_workspace / "IDENTITY.md").exists():
+    if not (agent_workspace / "IDENTITY.md").exists() or (agent_workspace / "IDENTITY.md").stat().st_size == 0:
         (agent_workspace / "IDENTITY.md").write_text(
             f"- **Name:** {name}\n- **Role:** {role}\n- **Emoji:** {emoji}\n")
     if not (agent_workspace / "USER.md").exists():
         (agent_workspace / "USER.md").write_text(
             f"# USER.md\n\n- **Name:** {_s('user.name', lang)}\n- **Role:** {_s('user.role', lang)}\n")
-    if not (agent_workspace / "TOOLS.md").exists():
+    if not (agent_workspace / "TOOLS.md").exists() or (agent_workspace / "TOOLS.md").stat().st_size == 0:
         (agent_workspace / "TOOLS.md").write_text(
             "# TOOLS.md\n\n## Commands\n"
             "- `@mention` to instruct team members\n"
@@ -1116,6 +1152,8 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji, lang
             "- `[TASK_START:name]` Start task\n"
             "- `[CRON_ADD:name:mins:prompt]` Schedule recurring task\n"
             "- `[CRON_DEL:name]` Delete recurring task\n"
+            "- `[APPROVAL:category:title:detail]` Submit approval (기안서)\n"
+            "  Categories: 예산,구매,프로젝트,인사,정책,기타\n"
         )
     if not (agent_workspace / "HEARTBEAT.md").exists():
         (agent_workspace / "HEARTBEAT.md").write_text(
@@ -1875,38 +1913,18 @@ def nudge_agent(cid, text, target):
                         except Exception as e:
                             print(f"[nudge] post failed: {e}")
 
-                    # CEO acknowledgment detection: if no @agent mention (only @마스터 doesn't count), nudge again
-                    has_agent_mention = bool(re.search(r'@(CMO|CTO|CEO|CFO|COO)', clean, re.IGNORECASE))
-                    # Rate limit mentions to prevent ping-pong loops
+                    # CEO delegation detection — skip if this was an escalation/approval response
+                    is_escalation_response = '마스터의 결재 응답' in text or '에스컬레이션' in text
+                    # Strip emoji from mentions before checking (agents may include emoji like @📈CMO)
+                    clean_for_mention = re.sub(r'@[^\w\s]*(\w+)', r'@\1', clean)
+                    has_agent_mention = bool(re.search(r'@(CMO|CTO|CFO|COO|HR|Designer|Sales|Legal|Support)', clean_for_mention, re.IGNORECASE))
                     if has_agent_mention:
-                        mentions = ','.join(re.findall(r'@(\w+)', clean, re.IGNORECASE))
+                        mentions = ','.join(re.findall(r'@(\w+)', clean_for_mention, re.IGNORECASE))
                         chain = f"{aid}->{mentions}"
                         mention_count = _bump_mention_chain(cid, chain)
                         if mention_count > _MENTION_LIMIT:
                             print(f"[nudge] mention rate limit hit: {chain} ({mention_count})")
                             has_agent_mention = False
-                    if aid == 'ceo' and not has_agent_mention and len(clean) < 300:
-                        print(f"[nudge] CEO acknowledged without delegation, prompting for plan...")
-                        time.sleep(2)
-                        followup = f"{agent_name}, 당신은 방금 '{text[:50]}'에 대해 계획만 언급하고 팀원에게 지시하지 않았습니다. 지금 바로 구체적인 계획을 세우고 @CMO @CTO에 각자 해야 할 작업을 @멘션으로 지시하세요. COMPLEX 프로토콜을 따르세요."
-                        try:
-                            reply_f = RUNTIME.run(agent_id, session_id, followup, timeout=120)
-                        except subprocess.TimeoutExpired:
-                            reply_f = ''
-                        print(f"[nudge] CEO followup reply={len(reply_f)}chars")
-                        if reply_f:
-                            clean_f = '\n'.join(l for l in reply_f.split('\n')
-                                                if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
-                            if clean_f:
-                                for chunk in split_message(clean_f, max_chars=1500):
-                                    try:
-                                        payload = json.dumps({"from": agent_name, "emoji": emoji, "text": chunk}).encode()
-                                        req = urllib.request.Request(
-                                            f'http://localhost:3000/api/agent-msg/{cid}',
-                                            data=payload, headers={'Content-Type': 'application/json'})
-                                        _post_local(req.full_url, json.loads(payload))
-                                    except Exception as e:
-                                        print(f"[nudge] followup post failed: {e}")
 
         except subprocess.TimeoutExpired:
             print(f"[nudge] {agent_id} timeout after {time.time()-nudge_start:.0f}s")
@@ -2586,30 +2604,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not company: self._json({"error": "not found"}, 404); return
         now = datetime.now(); time_str = now.strftime('%H:%M')
 
-        # @마스터 멘션 감지 → 채팅 표시 + 승인 탭에도 추가
+        # Normalize emoji-prefixed mentions: @📈CMO → @CMO, @📈 CMO → @CMO
+        text = re.sub(r'@[^\w@]*(\w+)', r'@\1', text)
+
+        # @마스터 멘션 감지 → 채팅에만 표시 (결재 자동 생성 제거 — 무한 루프 방지)
         master_mention = re.search(r'@\uB9C8\uC2A4\uD130 ?(.*)', text, re.DOTALL)
         master_request = ''
         if master_mention:
             master_request = master_mention.group(1).strip()
             text = re.sub(r'@\uB9C8\uC2A4\uD130 ?', '', text).strip()
-            is_long = len(master_request) > 100 or master_request.count('\n') >= 2
-            # 짧은 건 채팅에도 표시, 긴 건 결재만
-            if not is_long:
-                chat_msg = {"from": from_agent, "emoji": emoji, "text": f"@마스터 {master_request}", "time": time_str, "type": "agent", "mention": True}
-                append_chat(cid, chat_msg, broadcast=True)
+            # @마스터 보고는 채팅에만 표시 (결재 자동 생성 안함)
+            chat_msg = {"from": from_agent, "emoji": emoji, "text": f"@마스터 {master_request}", "time": time_str, "type": "agent", "mention": True}
+            append_chat(cid, chat_msg, broadcast=True)
             append_activity(cid, {"time": time_str, "agent": from_agent, "text": f"@마스터 {master_request[:50]}{'...' if len(master_request)>50 else ''}"})
-            # 결재 탭에 전체 내용 저장
-            approval_item = {
-                'id': str(uuid.uuid4())[:8],
-                'from_agent': from_agent,
-                'from_emoji': emoji,
-                'type': '보고서' if is_long else '요청',
-                'detail': master_request,
-                'status': 'pending',
-                'time': time_str,
-                'created_at': datetime.now().isoformat()
-            }
-            append_approval(cid, approval_item)
             print(f"[master] {from_agent} → @마스터: {master_request[:60]}")
         
         # 에이전트 응답에서 멘션 부분과 일반 부분 분리
@@ -3012,24 +3019,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not approval_id: self._json({"error": "approval_id required"}, 400); return
         approval = resolve_approval(cid, approval_id, resolution)
         if approval:
-            # Pass user response back to the requesting agent
+            # Show approval result in chat only (no re-nudge to prevent loops)
             response_text = body.get('response', '').strip()
             from_agent = approval.get('from_agent', '')
-            if from_agent and response_text:
-                agent_id = f"{cid}-{from_agent.lower()}"
-                nudge_msg = f"@{from_agent} 마스터의 결재 응답입니다:\n{response_text}"
-                print(f"[approval] sending response to {from_agent}: {response_text[:60]}")
-                threading.Thread(target=nudge_agent, args=(cid, nudge_msg, from_agent.upper()), daemon=True).start()
-            elif from_agent and resolution == 'approved' and not response_text:
-                agent_id = f"{cid}-{from_agent.lower()}"
-                nudge_msg = f"@{from_agent} 마스터가 결재를 승인했습니다."
-                print(f"[approval] sending approval to {from_agent}")
-                threading.Thread(target=nudge_agent, args=(cid, nudge_msg, from_agent.upper()), daemon=True).start()
-            elif from_agent and resolution == 'rejected':
-                agent_id = f"{cid}-{from_agent.lower()}"
-                nudge_msg = f"@{from_agent} 마스터가 결재를 반려했습니다."
-                print(f"[approval] sending rejection to {from_agent}")
-                threading.Thread(target=nudge_agent, args=(cid, nudge_msg, from_agent.upper()), daemon=True).start()
+            status_emoji = '✅' if resolution == 'approved' else '❌'
+            status_label = '승인' if resolution == 'approved' else '반려'
+            chat_text = f"{status_emoji} 결재 {status_label}: {approval.get('detail','')[:100]}"
+            if response_text:
+                chat_text += f"\n📝 응답: {response_text[:200]}"
+            append_chat(cid, {"from": "마스터", "emoji": "👤", "text": chat_text,
+                              "time": datetime.now().strftime('%H:%M'), "type": "user"}, broadcast=True)
+            print(f"[approval] {status_label}: {from_agent} — {response_text[:60] if response_text else '(no response)'}")
 
             # If agent addition was approved, actually add the agent
             if resolution == 'approved' and approval.get('type') == 'agent_add':
@@ -3767,6 +3767,173 @@ async def api_onboard_agent(cid: str, agent_id: str):
     threading.Thread(target=_run, daemon=True).start()
     return {"ok": True, "message": f"{agent['name']} 온보딩 시작됨"}
 
+# ─── Announcements API ─────────────────────────────────────────────────────
+
+@app.get("/api/announcements/{cid}")
+def api_get_announcements(cid: str):
+    return db_get_announcements(cid)
+
+@app.post("/api/announcement-add/{cid}")
+async def api_add_announcement(cid: str, request: Request):
+    body = await request.json()
+    ann = db_add_announcement(cid, body)
+    db_add_audit(cid, 'announcement', body.get('author','master'), '', body.get('title',''))
+    sse_broadcast('company_update', {"id": cid, "company": get_company(cid)})
+    return {"ok": True, "announcement": ann}
+
+@app.delete("/api/announcement/{cid}/{aid}")
+def api_delete_announcement(cid: str, aid: str):
+    db_delete_announcement(cid, aid)
+    return {"ok": True}
+
+# ─── Work Journals API ─────────────────────────────────────────────────────
+
+@app.get("/api/journals/{cid}")
+def api_get_journals(cid: str, date: str | None = None, agent_id: str | None = None):
+    return db_get_journals(cid, date, agent_id)
+
+@app.post("/api/journal-auto/{cid}")
+async def api_auto_journals(cid: str):
+    """Auto-generate work journals for all agents based on today's activity."""
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(status_code=404, detail="not found")
+    today = datetime.now().strftime('%Y-%m-%d')
+    tasks = db_get_tasks(cid)
+    for a in company.get('agents', []):
+        a_tasks = [t for t in tasks if t.get('agent_id') == a['id']]
+        done = [t.get('title','') for t in a_tasks if t.get('status') == '완료']
+        doing = [t.get('title','') for t in a_tasks if t.get('status') == '진행중']
+        waiting = [t.get('title','') for t in a_tasks if t.get('status') == '대기']
+        db_add_journal(cid, {
+            'agent_id': a['id'], 'date': today,
+            'tasks_done': ', '.join(done[-5:]) or '없음',
+            'tasks_next': ', '.join(doing[:3] + waiting[:2]) or '없음',
+            'issues': '', 'notes': ''
+        })
+    db_add_audit(cid, 'journal_auto', 'system', '', f'{today} 업무일지 자동 생성')
+    return {"ok": True, "date": today}
+
+# ─── Policies API ──────────────────────────────────────────────────────────
+
+@app.get("/api/policies/{cid}")
+def api_get_policies(cid: str):
+    return db_get_policies(cid)
+
+@app.post("/api/policy-add/{cid}")
+async def api_add_policy(cid: str, request: Request):
+    body = await request.json()
+    p = db_add_policy(cid, body)
+    db_add_audit(cid, 'policy_add', body.get('author','master'), '', body.get('title',''))
+    return {"ok": True, "policy": p}
+
+@app.delete("/api/policy/{cid}/{pid}")
+def api_delete_policy(cid: str, pid: str):
+    db_delete_policy(cid, pid)
+    return {"ok": True}
+
+# ─── Budgets API ───────────────────────────────────────────────────────────
+
+@app.get("/api/budgets/{cid}")
+def api_get_budgets(cid: str):
+    return db_get_budgets(cid)
+
+@app.post("/api/budget-set/{cid}")
+async def api_set_budget(cid: str, request: Request):
+    body = await request.json()
+    b = db_set_budget(cid, body)
+    db_add_audit(cid, 'budget_set', 'master', body.get('department',''), f'allocated={body.get("allocated",0)}')
+    return {"ok": True, "budget": b}
+
+# ─── Votes API ─────────────────────────────────────────────────────────────
+
+@app.get("/api/votes/{cid}")
+def api_get_votes(cid: str):
+    return db_get_votes(cid)
+
+@app.post("/api/vote-add/{cid}")
+async def api_add_vote(cid: str, request: Request):
+    body = await request.json()
+    v = db_add_vote(cid, body)
+    db_add_audit(cid, 'vote_create', body.get('author','master'), '', body.get('title',''))
+    return {"ok": True, "vote": v}
+
+@app.post("/api/vote-cast/{cid}/{vid}")
+async def api_cast_vote(cid: str, vid: str, request: Request):
+    body = await request.json()
+    ok = db_cast_vote(cid, vid, body.get('voter',''), body.get('choice',''))
+    return {"ok": ok}
+
+# ─── Audit Log API ─────────────────────────────────────────────────────────
+
+@app.get("/api/audit/{cid}")
+def api_get_audit(cid: str):
+    return db_get_audit(cid, limit=200)
+
+# ─── Report Templates API ─────────────────────────────────────────────────
+
+@app.post("/api/report-generate/{cid}/{report_type}")
+async def api_generate_report(cid: str, report_type: str):
+    """Generate weekly/monthly report from data."""
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(status_code=404, detail="not found")
+    tasks = db_get_tasks(cid)
+    done = [t for t in tasks if t.get('status') == '완료']
+    doing = [t for t in tasks if t.get('status') == '진행중']
+    sprints = db_get_sprints(cid)
+    risks = db_get_risks(cid)
+    open_risks = [r for r in risks if r.get('status') == 'open']
+    milestones = db_get_milestones(cid)
+    agents = company.get('agents', [])
+    total_cost = sum(a.get('cost', {}).get('total_cost', 0) for a in agents)
+
+    if report_type == 'weekly':
+        report = f"# 📊 주간 보고서\n기간: {datetime.now().strftime('%Y-%m-%d')} 기준\n\n"
+    else:
+        report = f"# 📊 월간 보고서\n기간: {datetime.now().strftime('%Y-%m')} 기준\n\n"
+    report += f"## 요약\n- 전체 작업: {len(tasks)}건 (완료 {len(done)}, 진행 {len(doing)})\n"
+    report += f"- 완료율: {round(len(done)/len(tasks)*100) if tasks else 0}%\n"
+    report += f"- 총 비용: ${total_cost:.4f}\n"
+    report += f"- 리스크: {len(open_risks)}건 미해결\n\n"
+    report += f"## 완료 작업\n" + '\n'.join(f"- ✅ {t.get('title','')}" for t in done[-10:]) + '\n\n'
+    report += f"## 진행 중\n" + '\n'.join(f"- ⏳ {t.get('title','')} ({t.get('agent_id','')})" for t in doing[:10]) + '\n\n'
+    if open_risks:
+        report += f"## 리스크\n" + '\n'.join(f"- ⚠️ [{r.get('severity','')}] {r.get('title','')}" for r in open_risks[:5]) + '\n\n'
+    report += f"## 팀원 성과\n"
+    for a in agents:
+        a_done = len([t for t in done if t.get('agent_id') == a['id']])
+        report += f"- {a.get('emoji','')} {a['name']}: {a_done}건 완료, ${a.get('cost',{}).get('total_cost',0):.4f}\n"
+
+    db_save_doc(cid, f'report_{report_type}', '', report)
+    db_add_audit(cid, f'report_{report_type}', 'system', '', f'{report_type} report generated')
+    return {"ok": True, "report": report}
+
+# ─── CRM API ───────────────────────────────────────────────────────────────
+
+@app.get("/api/crm/{cid}")
+def api_get_contacts(cid: str, status: str | None = None):
+    return db_get_contacts(cid, status)
+
+@app.post("/api/crm-add/{cid}")
+async def api_add_contact(cid: str, request: Request):
+    body = await request.json()
+    c = db_add_contact(cid, body)
+    db_add_audit(cid, 'crm_add', body.get('owner','master'), body.get('name',''), body.get('status','lead'))
+    return {"ok": True, "contact": c}
+
+@app.post("/api/crm-update/{cid}/{contact_id}")
+async def api_update_contact(cid: str, contact_id: str, request: Request):
+    body = await request.json()
+    body['id'] = contact_id
+    db_add_contact(cid, body)  # INSERT OR REPLACE
+    return {"ok": True}
+
+@app.delete("/api/crm/{cid}/{contact_id}")
+def api_delete_contact(cid: str, contact_id: str):
+    db_delete_contact(cid, contact_id)
+    return {"ok": True}
+
 # ── Static files (must be last — catches everything else) ──────────────────
 
 app.mount("/", StaticFiles(directory=str(BASE / "dashboard"), html=True), name="static")
@@ -3791,6 +3958,15 @@ def ensure_agents_registered():
         state_file = DATA / f"{cid}.json"
         if not state_file.exists():
             save_json(state_file, company)
+        # Fix empty SOUL.md files on startup
+        for ag in company.get('agents', []):
+            ws = DATA / cid / "workspaces" / ag['id']
+            soul = ws / "SOUL.md"
+            if ws.exists() and (not soul.exists() or soul.stat().st_size == 0):
+                print(f"[INIT] Regenerating SOUL.md for {ag['id']}...")
+                setup_agent_workspace(ws, ag['name'], ag.get('role',''),
+                                      company.get('name',''), ag.get('emoji','🤖'),
+                                      lang=company.get('lang','ko'), cid=cid)
         for agent in company.get('agents', []):
             agent_id = agent.get('agent_id', '')
             if not agent_id:

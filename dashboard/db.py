@@ -112,10 +112,17 @@ _COMPANY_SCHEMA = """
         from_agent TEXT DEFAULT '',
         from_emoji TEXT DEFAULT '',
         approval_type TEXT DEFAULT '요청',
+        category TEXT DEFAULT 'general',
+        title TEXT DEFAULT '',
         detail TEXT DEFAULT '',
-        status TEXT DEFAULT 'pending',
+        amount TEXT DEFAULT '',
+        approval_line TEXT DEFAULT '[]',
+        current_step INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'draft',
+        comments TEXT DEFAULT '[]',
         time TEXT DEFAULT '',
-        created_at TEXT DEFAULT ''
+        created_at TEXT DEFAULT '',
+        updated_at TEXT DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_approvals_company ON approvals(company_id);
     CREATE TABLE IF NOT EXISTS activity_log (
@@ -215,6 +222,89 @@ _COMPANY_SCHEMA = """
         updated_at TEXT DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_risks_company ON risks(company_id);
+    CREATE TABLE IF NOT EXISTS announcements (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        content TEXT DEFAULT '',
+        author TEXT DEFAULT '',
+        pinned INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_ann_company ON announcements(company_id);
+    CREATE TABLE IF NOT EXISTS work_journals (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        agent_id TEXT DEFAULT '',
+        date TEXT DEFAULT '',
+        tasks_done TEXT DEFAULT '',
+        tasks_next TEXT DEFAULT '',
+        issues TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_wj_company ON work_journals(company_id, date);
+    CREATE TABLE IF NOT EXISTS policies (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        content TEXT DEFAULT '',
+        category TEXT DEFAULT 'general',
+        effective_date TEXT DEFAULT '',
+        created_at TEXT DEFAULT '',
+        updated_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_pol_company ON policies(company_id);
+    CREATE TABLE IF NOT EXISTS budgets (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        agent_id TEXT DEFAULT '',
+        department TEXT DEFAULT '',
+        allocated REAL DEFAULT 0,
+        spent REAL DEFAULT 0,
+        period TEXT DEFAULT '',
+        created_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_bud_company ON budgets(company_id);
+    CREATE TABLE IF NOT EXISTS votes (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        options TEXT DEFAULT '[]',
+        results TEXT DEFAULT '{}',
+        voters TEXT DEFAULT '[]',
+        status TEXT DEFAULT 'open',
+        deadline TEXT DEFAULT '',
+        created_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_votes_company ON votes(company_id);
+    CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id TEXT NOT NULL,
+        action TEXT DEFAULT '',
+        actor TEXT DEFAULT '',
+        target TEXT DEFAULT '',
+        detail TEXT DEFAULT '',
+        created_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_company ON audit_log(company_id);
+    CREATE TABLE IF NOT EXISTS crm_contacts (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        name TEXT DEFAULT '',
+        email TEXT DEFAULT '',
+        phone TEXT DEFAULT '',
+        company_name TEXT DEFAULT '',
+        role TEXT DEFAULT '',
+        status TEXT DEFAULT 'lead',
+        notes TEXT DEFAULT '',
+        tags TEXT DEFAULT '',
+        owner TEXT DEFAULT '',
+        created_at TEXT DEFAULT '',
+        updated_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_crm_company ON crm_contacts(company_id);
 """
 
 def _ensure_company_db(cid: str):
@@ -225,6 +315,13 @@ def _ensure_company_db(cid: str):
     for stmt in [
         "ALTER TABLE chat_messages ADD COLUMN parent_id INTEGER DEFAULT NULL",
         "ALTER TABLE plan_tasks ADD COLUMN description TEXT DEFAULT ''",
+        "ALTER TABLE approvals ADD COLUMN category TEXT DEFAULT 'general'",
+        "ALTER TABLE approvals ADD COLUMN title TEXT DEFAULT ''",
+        "ALTER TABLE approvals ADD COLUMN amount TEXT DEFAULT ''",
+        "ALTER TABLE approvals ADD COLUMN approval_line TEXT DEFAULT '[]'",
+        "ALTER TABLE approvals ADD COLUMN current_step INTEGER DEFAULT 0",
+        "ALTER TABLE approvals ADD COLUMN comments TEXT DEFAULT '[]'",
+        "ALTER TABLE approvals ADD COLUMN updated_at TEXT DEFAULT ''",
     ]:
         try:
             conn.execute(stmt)
@@ -1164,6 +1261,209 @@ def db_delete_risk(cid, rid):
         conn.execute("DELETE FROM risks WHERE id=? AND company_id=?", (rid, cid))
         conn.commit()
         conn.close()
+
+# ─── Announcements ───
+
+def db_get_announcements(cid):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute("SELECT * FROM announcements WHERE company_id=? ORDER BY pinned DESC, created_at DESC", (cid,)).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+def db_add_announcement(cid, ann):
+    import uuid
+    aid = ann.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute("INSERT INTO announcements (id,company_id,title,content,author,pinned,created_at) VALUES (?,?,?,?,?,?,?)",
+            (aid, cid, ann.get('title',''), ann.get('content',''), ann.get('author',''), 1 if ann.get('pinned') else 0, now))
+        conn.commit(); conn.close()
+    return {**ann, 'id': aid, 'created_at': now}
+
+def db_delete_announcement(cid, aid):
+    with _get_lock(cid):
+        conn = _conn(cid)
+        conn.execute("DELETE FROM announcements WHERE id=? AND company_id=?", (aid, cid))
+        conn.commit(); conn.close()
+
+# ─── Work Journals ───
+
+def db_get_journals(cid, date=None, agent_id=None):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        q = "SELECT * FROM work_journals WHERE company_id=?"
+        params = [cid]
+        if date: q += " AND date=?"; params.append(date)
+        if agent_id: q += " AND agent_id=?"; params.append(agent_id)
+        rows = conn.execute(q + " ORDER BY date DESC, agent_id", params).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+def db_add_journal(cid, j):
+    import uuid
+    jid = j.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute("INSERT OR REPLACE INTO work_journals (id,company_id,agent_id,date,tasks_done,tasks_next,issues,notes,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (jid, cid, j.get('agent_id',''), j.get('date',''), j.get('tasks_done',''), j.get('tasks_next',''), j.get('issues',''), j.get('notes',''), now))
+        conn.commit(); conn.close()
+    return {**j, 'id': jid, 'created_at': now}
+
+# ─── Policies ───
+
+def db_get_policies(cid):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute("SELECT * FROM policies WHERE company_id=? ORDER BY category, created_at", (cid,)).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+def db_add_policy(cid, p):
+    import uuid
+    pid = p.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute("INSERT OR REPLACE INTO policies (id,company_id,title,content,category,effective_date,created_at,updated_at) VALUES (?,?,?,?,?,?,COALESCE((SELECT created_at FROM policies WHERE id=?),?),?)",
+            (pid, cid, p.get('title',''), p.get('content',''), p.get('category','general'), p.get('effective_date',''), pid, now, now))
+        conn.commit(); conn.close()
+    return {**p, 'id': pid}
+
+def db_delete_policy(cid, pid):
+    with _get_lock(cid):
+        conn = _conn(cid)
+        conn.execute("DELETE FROM policies WHERE id=? AND company_id=?", (pid, cid))
+        conn.commit(); conn.close()
+
+# ─── Budgets ───
+
+def db_get_budgets(cid):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute("SELECT * FROM budgets WHERE company_id=? ORDER BY department", (cid,)).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+def db_set_budget(cid, b):
+    import uuid
+    bid = b.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute("INSERT OR REPLACE INTO budgets (id,company_id,agent_id,department,allocated,spent,period,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (bid, cid, b.get('agent_id',''), b.get('department',''), b.get('allocated',0), b.get('spent',0), b.get('period',''), now))
+        conn.commit(); conn.close()
+    return {**b, 'id': bid}
+
+# ─── Votes ───
+
+def db_get_votes(cid):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute("SELECT * FROM votes WHERE company_id=? ORDER BY created_at DESC", (cid,)).fetchall()
+        conn.close()
+    results = []
+    for r in rows:
+        d = dict(r)
+        for k in ('options','voters'):
+            try: d[k] = json.loads(d[k]) if d[k] else []
+            except: d[k] = []
+        try: d['results'] = json.loads(d['results']) if d['results'] else {}
+        except: d['results'] = {}
+        results.append(d)
+    return results
+
+def db_add_vote(cid, v):
+    import uuid
+    vid = v.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute("INSERT INTO votes (id,company_id,title,description,options,results,voters,status,deadline,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (vid, cid, v.get('title',''), v.get('description',''), json.dumps(v.get('options',[]),ensure_ascii=False),
+             '{}', '[]', 'open', v.get('deadline',''), now))
+        conn.commit(); conn.close()
+    return {**v, 'id': vid, 'status': 'open', 'created_at': now}
+
+def db_cast_vote(cid, vote_id, voter, choice):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        row = conn.execute("SELECT results,voters FROM votes WHERE id=? AND company_id=?", (vote_id, cid)).fetchone()
+        if not row: conn.close(); return False
+        results = json.loads(row['results'] or '{}')
+        voters = json.loads(row['voters'] or '[]')
+        if voter in voters: conn.close(); return False
+        results[choice] = results.get(choice, 0) + 1
+        voters.append(voter)
+        conn.execute("UPDATE votes SET results=?, voters=? WHERE id=? AND company_id=?",
+            (json.dumps(results,ensure_ascii=False), json.dumps(voters,ensure_ascii=False), vote_id, cid))
+        conn.commit(); conn.close()
+    return True
+
+# ─── Audit Log ───
+
+def db_add_audit(cid, action, actor='', target='', detail=''):
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute("INSERT INTO audit_log (company_id,action,actor,target,detail,created_at) VALUES (?,?,?,?,?,?)",
+            (cid, action, actor, target, detail[:500], now))
+        conn.commit(); conn.close()
+
+def db_get_audit(cid, limit=100):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute("SELECT * FROM audit_log WHERE company_id=? ORDER BY id DESC LIMIT ?", (cid, limit)).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+# ─── CRM ───
+
+def db_get_contacts(cid, status=None):
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        if status:
+            rows = conn.execute("SELECT * FROM crm_contacts WHERE company_id=? AND status=? ORDER BY updated_at DESC", (cid, status)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM crm_contacts WHERE company_id=? ORDER BY updated_at DESC", (cid,)).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+def db_add_contact(cid, c):
+    import uuid
+    cid_contact = c.get('id') or str(uuid.uuid4())[:8]
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute("INSERT OR REPLACE INTO crm_contacts (id,company_id,name,email,phone,company_name,role,status,notes,tags,owner,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM crm_contacts WHERE id=?),?),?)",
+            (cid_contact, cid, c.get('name',''), c.get('email',''), c.get('phone',''), c.get('company_name',''),
+             c.get('role',''), c.get('status','lead'), c.get('notes',''), c.get('tags',''), c.get('owner',''), cid_contact, now, now))
+        conn.commit(); conn.close()
+    return {**c, 'id': cid_contact, 'updated_at': now}
+
+def db_delete_contact(cid, contact_id):
+    with _get_lock(cid):
+        conn = _conn(cid)
+        conn.execute("DELETE FROM crm_contacts WHERE id=? AND company_id=?", (contact_id, cid))
+        conn.commit(); conn.close()
 
 # ─── Migration ───
 
