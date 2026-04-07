@@ -8,11 +8,14 @@ class OpenClawRuntime(AgentRuntime):
     """Executes agents via the `openclaw` CLI subprocess."""
 
     def run(self, agent_id: str, session_id: str, prompt: str,
-            timeout: int = 120) -> str:
+            timeout: int = 120, model: str = 'zai/glm-5-turbo') -> str:
         """Run a prompt through openclaw and return raw stdout."""
+        cmd = ['openclaw', 'agent', '--agent', agent_id,
+             '--session-id', session_id, '--local', '-m', prompt]
+        if model:
+            cmd.extend(['--model', model])
         proc = subprocess.Popen(
-            ['openclaw', 'agent', '--agent', agent_id,
-             '--session-id', session_id, '--local', '-m', prompt],
+            cmd,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         try:
