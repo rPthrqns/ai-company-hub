@@ -1353,6 +1353,7 @@ _MAX_CONCURRENT = 2  # max agents thinking at once
 _ACTIVE_SEMAPHORE = threading.Semaphore(_MAX_CONCURRENT)
 
 _newspaper_cache = {}  # {cid: (brief, timestamp)}
+_AB_RESULTS = {}  # {test_id: {status, agents: [{agent_id, response, elapsed}]}}
 
 
 def _clean_mention_counts(now_ts=None):
@@ -1925,6 +1926,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._json(get_approvals(cid, status_filter))
         elif self.path.startswith('/api/search'):
             self._handle_search()
+        elif self.path.startswith('/api/ab-result/'):
+            test_id = self.path.split('/')[-1]
+            self._json(_AB_RESULTS.get(test_id, {"status": "not_found"}))
         elif self.path == '/api/agents':
             self._json(AGENT_TEMPLATES)
         elif self.path == '/api/topics':
@@ -2079,6 +2083,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif path.startswith('/api/cross-nudge'):
             self._handle_cross_nudge(path, body)
 
+        elif path.startswith('/api/ab-test/'):
+            self._handle_ab_test(path, body)
+
         elif path.startswith('/api/meeting/'):
             self._handle_meeting(path, body)
 
@@ -2106,6 +2113,62 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # Forward to CEO
         threading.Thread(target=nudge_agent, args=(cid, f"[웹훅 수신] {text[:200]}", 'CEO'), daemon=True).start()
         self._json({"ok": True})
+
+    # ─── A/B Agent Test Handler ───
+    def _handle_ab_test(self, path, body):
+        """POST /api/ab-test/{cid} — send same prompt to 2+ agents simultaneously and compare."""
+        cid = path.split('/')[-1]
+        company = get_company(cid)
+        if not company: self._json({"error": "not found"}, 404); return
+        text = body.get('text', '').strip()
+        agent_ids = body.get('agents', [])
+        if not text: self._json({"error": "text required"}, 400); return
+        if len(agent_ids) < 2: self._json({"error": "need at least 2 agents"}, 400); return
+
+        test_id = f"ab-{uuid.uuid4().hex[:8]}"
+        agents = company.get('agents', [])
+        participants = [a for a in agents if a['id'] in agent_ids]
+        if len(participants) < 2:
+            self._json({"error": "agents not found in company"}, 400); return
+
+        _AB_RESULTS[test_id] = {
+            'status': 'running', 'text': text,
+            'agents': [{'agent_id': a['id'], 'name': a.get('name',''), 'emoji': a.get('emoji','🤖'),
+                        'response': None, 'elapsed': None, 'status': 'waiting'} for a in participants]
+        }
+
+        def _run_agent(idx, agent):
+            start = time.time()
+            _AB_RESULTS[test_id]['agents'][idx]['status'] = 'running'
+            ab_prompt = f"[A/B 테스트] {text}\n\n이 지시에 대해 당신의 관점에서 최선의 응답을 작성하세요."
+            # Direct subprocess call (bypassing queue for clean comparison)
+            agent_id_full = agent.get('agent_id', f"{cid}-{agent['id']}")
+            session_id = f"{agent_id_full}-ab-{test_id}"
+            try:
+                proc = subprocess.Popen(
+                    ['openclaw', 'agent', '--agent', agent_id_full,
+                     '--session-id', session_id, '--local', '-m', ab_prompt],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                stdout, _ = proc.communicate(timeout=120)
+                reply = stdout.decode().strip()
+                lines = reply.split('\n')
+                clean = '\n'.join(l for l in lines if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
+                elapsed = round(time.time() - start, 1)
+                _AB_RESULTS[test_id]['agents'][idx]['response'] = clean or '(응답 없음)'
+                _AB_RESULTS[test_id]['agents'][idx]['elapsed'] = elapsed
+                _AB_RESULTS[test_id]['agents'][idx]['status'] = 'done'
+                _AB_RESULTS[test_id]['agents'][idx]['tokens'] = max(len(clean) // 4, 1)
+            except Exception as e:
+                _AB_RESULTS[test_id]['agents'][idx]['response'] = f'오류: {e}'
+                _AB_RESULTS[test_id]['agents'][idx]['status'] = 'error'
+            # Check if all done
+            if all(r['status'] in ('done','error') for r in _AB_RESULTS[test_id]['agents']):
+                _AB_RESULTS[test_id]['status'] = 'done'
+                sse_broadcast('ab_done', {'test_id': test_id})
+
+        for i, a in enumerate(participants):
+            threading.Thread(target=_run_agent, args=(i, a), daemon=True).start()
+        self._json({"ok": True, "test_id": test_id})
 
     # ─── Cross-Company Outsourcing Handler ───
     def _handle_cross_nudge(self, path, body):
