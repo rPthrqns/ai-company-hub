@@ -4068,18 +4068,21 @@ def _preflight_check():
                 try: lock_file.unlink(); fixes.append('lock')
                 except: pass
 
-    # 2. Ensure default model is set correctly (not gpt-5.4 which requires separate API key)
+    # 2. Check default model and allow override via env var
+    env_model = os.environ.get('OPENCLAW_MODEL', '')
     if openclaw_config.exists():
         try:
             cfg = json.loads(openclaw_config.read_text())
             model = cfg.get('agents', {}).get('defaults', {}).get('model', {})
             primary = model.get('primary', '')
-            if primary and 'gpt' in primary.lower() and 'zai' not in primary.lower():
-                # Fix: set to zai/glm-5 which is available
-                model['primary'] = 'zai/glm-5'
+            if env_model:
+                # User explicitly set model via env var
+                model['primary'] = env_model
                 cfg['agents']['defaults']['model'] = model
                 openclaw_config.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
-                fixes.append(f'model:{primary}→zai/glm-5')
+                fixes.append(f'model→{env_model}(env)')
+            elif primary:
+                print(f"[preflight] model: {primary} (set OPENCLAW_MODEL env to override)")
         except Exception as e:
             print(f"[preflight] config check failed: {e}")
 
