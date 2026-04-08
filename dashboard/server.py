@@ -1818,36 +1818,31 @@ def nudge_agent(cid, text, target):
 
             print(f"[nudge] calling RUNTIME.run for {agent_id} session={session_id} prompt_len={len(prompt)}")
             try:
-                reply_raw = RUNTIME.run(agent_id, session_id, prompt, timeout=120)
+                reply_raw = RUNTIME.run(agent_id, session_id, prompt, timeout=90)
             except subprocess.TimeoutExpired:
                 print(f"[nudge] {agent_id} main timeout")
-                raise
+                reply_raw = ''
             elapsed = time.time() - nudge_start
             print(f"[nudge] {agent_id} reply={len(reply_raw)}chars time={elapsed:.1f}s raw={reply_raw[:100]}")
 
-            retry_ok = bool(reply_raw)
+            # Retry once with fresh session if failed
             if not reply_raw or 'No reply from agent' in reply_raw:
-                print(f"[nudge] {agent_id} no reply, retrying...")
+                print(f"[nudge] {agent_id} no reply, retrying with fresh session...")
+                # Clean locks before retry
+                sessions_dir = Path.home() / '.openclaw' / 'agents' / agent_id / 'sessions'
+                if sessions_dir.exists():
+                    for lf in sessions_dir.glob('*.lock'):
+                        try: lf.unlink()
+                        except: pass
                 time.sleep(2)
-                try:
-                    reply_raw = RUNTIME.run(agent_id, f"{session_id}-retry", prompt, timeout=120)
-                    retry_ok = bool(reply_raw)
-                except subprocess.TimeoutExpired:
-                    retry_ok = False
-                print(f"[nudge] {agent_id} retry reply={len(reply_raw)}chars")
-
-            # 3rd attempt: session reset
-            if not reply_raw or 'No reply from agent' in reply_raw or not retry_ok:
-                print(f"[nudge] {agent_id} 2nd attempt failed, resetting session...")
-                time.sleep(5)
                 new_session = f"{agent_id}-fresh-{int(time.time())}"
                 try:
-                    reply_raw = RUNTIME.run(agent_id, new_session, prompt, timeout=120)
+                    reply_raw = RUNTIME.run(agent_id, new_session, prompt, timeout=60)
                 except subprocess.TimeoutExpired:
                     reply_raw = ''
-                print(f"[nudge] {agent_id} 3rd attempt reply={len(reply_raw)}chars")
+                print(f"[nudge] {agent_id} retry reply={len(reply_raw)}chars")
                 if reply_raw and 'No reply from agent' not in reply_raw:
-                    session_id = new_session  # Use new session going forward
+                    session_id = new_session
 
             # All attempts failed — escalation chain (with loop prevention)
             if not reply_raw or 'No reply from agent' in reply_raw:
@@ -1879,8 +1874,7 @@ def nudge_agent(cid, text, target):
                 if not escalated:
                     try:
                         agent_model = agent.get('model', 'default')
-                        lang = comp.get('lang', 'ko') if comp else 'ko'
-                        msg = f"⚠️ {emoji} {agent_name}이(가) 응답하지 않았습니다.\n💡 모델({agent_model})이 작동하지 않을 수 있습니다. 조직도에서 🧠 클릭으로 모델을 변경해보세요."
+                        msg = f"⚠️ {emoji} {agent_name}이(가) 응답하지 않았습니다.\n💡 같은 메시지를 다시 보내보세요.\n💡 계속 실패하면 조직도에서 🧠 클릭으로 모델({agent_model})을 변경해보세요."
                         payload = json.dumps({"from": "시스템", "emoji": "⚠️", "text": msg}).encode()
                         _post_local(f'http://localhost:3000/api/agent-msg/{cid}', json.loads(payload))
                     except Exception as e:

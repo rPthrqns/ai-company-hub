@@ -26,6 +26,12 @@ class OpenClawRuntime(AgentRuntime):
         last_check_size = 0
         while time.time() - start < timeout:
             time.sleep(3)
+            # Early exit: if process died immediately (bad args, missing binary)
+            if proc.poll() is not None and time.time() - start > 5:
+                rc = proc.returncode
+                if rc != 0 and not result:
+                    raise subprocess.TimeoutExpired(['openclaw', 'agent'], timeout,
+                                                     f"process exited with code {rc}")
             if not sessions_dir.exists():
                 continue
             for f in sorted(sessions_dir.glob('*.jsonl'), key=lambda x: x.stat().st_mtime, reverse=True):
