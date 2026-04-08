@@ -1465,11 +1465,13 @@ def start_task_thread(cid, task):
 def execute_task(cid, task):
     """Execute a single recurring task run."""
     agent_id_full = f"{cid}-{task['agent_id']}"
-    prompt = f"""당신은 '{task['agent_name']}'입니다. 다음 정기 작업을 수행하세요:
+    company = get_company(cid)
+    leader = get_leader_id(company) if company else 'CEO'
+    prompt = f"""Execute this recurring task immediately:
 
 {task['prompt']}
 
-간결하게 결과만 @CEO에게 보고하세요. (2-3줄 이내) @마스터는 절대 멘션하지 마세요."""
+Report results concisely (2-3 lines) to @{leader.upper()}. Do NOT mention @master."""
     start = time.time()
     try:
         proc = subprocess.Popen(
@@ -1874,28 +1876,28 @@ def nudge_agent(cid, text, target):
         lang_name = LANG.get(company.get('lang','ko'), '한국어') if company else '한국어'
         is_leader = (aid == get_leader_id(company)) if company else (aid == 'ceo')
         if is_leader:
+            other_agents = [a['id'].upper() for a in (company.get('agents',[]) if company else []) if a['id'] != aid][:4]
+            mention_list = ' '.join(f'@{a}' for a in other_agents) if other_agents else '@팀원'
             instruction = (
-                f"\n\n[마스터 지시] {msg}"
-                f"\n\n[CEO 행동 규칙]"
-                f"\n1. {lang_name}로 구체적인 계획/결과를 즉시 응답하세요."
-                f"\n2. 준비 발언('파악하겠습니다','확인하겠습니다') 금지. 바로 실행."
-                f"\n3. 팀원 지시: @CMO 구체적지시 @CTO 구체적지시."
-                f"\n4. 계획: 1. 2. 3. 번호 목록."
-                f"\n5. 기한 없음. 최대한 빠르게 즉시 완료."
-                f"\n6. 마스터 결정/승인/현실 행동이 필요하면 [APPROVAL:카테고리:제목:상세내용] 명령으로 기안 올리세요."
-                f"\n   (예: 예산, 구매, 인사, 외부 API키, 전략 방향 등)"
-                f"\n7. NO_REPLY 금지."
+                f"\n\n[INSTRUCTION] {msg}"
+                f"\n\n[RULES — STRICTLY FOLLOW]"
+                f"\n- Respond in {lang_name}. Be concrete and actionable."
+                f"\n- NO prep talk ('I will check', 'Let me analyze'). Execute immediately."
+                f"\n- NO deadlines/timelines. Everything is ASAP."
+                f"\n- Delegate to team: {mention_list} with specific tasks."
+                f"\n- Use numbered list for plans."
+                f"\n- Need master's decision? Use [APPROVAL:category:title:detail]"
+                f"\n- NO_REPLY forbidden."
             )
         else:
             instruction = (
-                f"\n\n[지시] {msg}"
-                f"\n\n[행동 규칙]"
-                f"\n1. {lang_name}로 구체적인 결과를 즉시 응답."
-                f"\n2. 완료 후 @CEO에게 보고."
-                f"\n3. 기한 없음. 최대한 빠르게 즉시 완료."
-                f"\n4. 마스터 결정/승인이 필요하면 [APPROVAL:카테고리:제목:내용]으로 기안 올리세요."
-                f"\n   (예산, 외부 계정, 전략 변경, 팀간 갈등 등)"
-                f"\n5. NO_REPLY 금지."
+                f"\n\n[INSTRUCTION] {msg}"
+                f"\n\n[RULES]"
+                f"\n- Respond in {lang_name}. Deliver results immediately."
+                f"\n- NO prep talk. Execute and report."
+                f"\n- Report results to @{get_leader_id(company).upper() if company else 'CEO'}."
+                f"\n- Need approval? Use [APPROVAL:category:title:detail]"
+                f"\n- NO_REPLY forbidden."
             )
         prompt = f"{ctx}{instruction}" if ctx else instruction.strip()
 
@@ -3144,17 +3146,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not approval_id: self._json({"error": "approval_id required"}, 400); return
         approval = resolve_approval(cid, approval_id, resolution)
         if approval:
-            # Show approval result in chat only (no re-nudge to prevent loops)
             response_text = body.get('response', '').strip()
             from_agent = approval.get('from_agent', '')
+            is_escalation = approval.get('approval_type','') == 'escalation' or approval.get('type','') == 'escalation'
             status_emoji = '✅' if resolution == 'approved' else '❌'
-            status_label = '승인' if resolution == 'approved' else '반려'
-            chat_text = f"{status_emoji} 결재 {status_label}: {approval.get('detail','')[:100]}"
+            status_label = 'approved' if resolution == 'approved' else 'rejected'
+            chat_text = f"{status_emoji} {status_label}: {approval.get('title', approval.get('detail',''))[:100]}"
             if response_text:
-                chat_text += f"\n📝 응답: {response_text[:200]}"
+                chat_text += f"\n📝 {response_text[:200]}"
             append_chat(cid, {"from": "마스터", "emoji": "👤", "text": chat_text,
                               "time": datetime.now().strftime('%H:%M'), "type": "user"}, broadcast=True)
             print(f"[approval] {status_label}: {from_agent} — {response_text[:60] if response_text else '(no response)'}")
+            # Notify agent to proceed (skip escalation to prevent loops)
+            if resolution == 'approved' and from_agent and not is_escalation:
+                company = get_company(cid)
+                leader_id = get_leader_id(company) if company else 'ceo'
+                detail = approval.get('detail', '')[:200]
+                nudge_text = f"마스터가 승인했습니다. 즉시 실행하세요: {detail}"
+                agent_target = from_agent.lower() if from_agent.lower() != 'master' else leader_id
+                threading.Thread(target=nudge_agent, args=(cid, nudge_text, agent_target.upper()), daemon=True).start()
 
             # If agent addition was approved, actually add the agent
             if resolution == 'approved' and approval.get('type') == 'agent_add':
