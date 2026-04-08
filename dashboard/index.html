@@ -2888,42 +2888,51 @@ function renderInlineOrgChart(){
   const topLevel=agents.filter(a=>a.id!=='ceo'&&!a.parent_agent);
 
   const _card=(a,size)=>{
-    const sc=a.status==='working'?'#fbbf24':a.status==='active'?'#22c55e':a.status==='registering'?'#3b82f6':'#64748b';
-    const sl=a.status==='working'?'작업중':a.status==='active'?'활성':a.status==='registering'?'생성중':'대기';
-    const bg=a.status==='working'?'linear-gradient(135deg,#1c1917,#292524)':'linear-gradient(135deg,#0f172a,#1e293b)';
-    const bd=a.status==='working'?`2px solid ${sc}`:`1px solid #334155`;
+    const isWorking=a.status==='working'||agentThinking[`${currentCompany}:${a.id}`];
+    const sc=isWorking?'#fbbf24':a.status==='active'?'#22c55e':a.status==='registering'?'#3b82f6':'#64748b';
+    const sl=isWorking?'⚡ 작업중':a.status==='active'?'● 활성':a.status==='registering'?'◌ 생성중':'○ 대기';
     const tasks=cachedBoardTasks?cachedBoardTasks.filter(t=>t.agent_id===a.id):[];
     const done=tasks.filter(t=>t.status==='완료').length,total=tasks.length;
     const isLg=size==='lg';
     const costVal=(a.cost?.total_cost||0);
-    const costHtml=costVal>0?`<div style="font-size:8px;color:#94a3b8;margin-top:2px">💰 $${costVal.toFixed(4)}</div>`:'';
     const modelName=(a.model||'').split('/').pop()||'default';
-    const modelHtml=`<div style="font-size:7px;color:#475569;margin-top:1px;cursor:pointer" onclick="event.stopPropagation();changeAgentModel('${a.id}')" title="클릭하여 모델 변경">🧠 ${_esc(modelName)}</div>`;
     const thinkKey=`${currentCompany}:${a.id}`;
     const thinking=agentThinking[thinkKey];
-    const liveHtml=thinking?`<div style="font-size:8px;color:#fbbf24;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">⚡ ${_esc((thinking.promptPreview||'').substring(0,25))}</div>`:'';
-    const actBtns=`<div style="display:flex;gap:3px;margin-top:4px;justify-content:center" onclick="event.stopPropagation()">
-      <button onclick="insertMention('${_esc(a.name)}')" style="background:none;border:1px solid #334155;border-radius:4px;color:#60a5fa;font-size:8px;padding:1px 5px;cursor:pointer" title="멘션">@</button>
-      <button onclick="reactivateAgent('${currentCompany}','${a.id}','${_esc(a.emoji)} ${_esc(a.name)}')" style="background:none;border:1px solid #334155;border-radius:4px;color:#94a3b8;font-size:8px;padding:1px 5px;cursor:pointer" title="재활성화">🔄</button>
-      <button onclick="deleteAgent('${currentCompany}','${a.id}','${_esc(a.emoji)} ${_esc(a.name)}')" style="background:none;border:1px solid #334155;border-radius:4px;color:#ef4444;font-size:8px;padding:1px 5px;cursor:pointer" title="삭제">✕</button>
-    </div>`;
-    return `<div onclick="_inlineOrgChartNodeClick(${JSON.stringify(a).replace(/"/g,'&quot;')})" style="background:${bg};border:${bd};border-radius:${isLg?10:8}px;padding:${isLg?'8px 12px':'6px 8px'};cursor:pointer;transition:all .2s;min-width:${isLg?110:85}px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.3)" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 16px rgba(0,0,0,.5)'" onmouseout="this.style.transform='';this.style.boxShadow='0 2px 8px rgba(0,0,0,.3)'">
-      <div style="font-size:${isLg?22:18}px;margin-bottom:2px">${a.emoji||'🤖'}</div>
-      <div style="font-size:${isLg?11:10}px;font-weight:600;color:#e2e8f0">${_esc(a.name)}</div>
-      <div style="font-size:${isLg?10:9}px;color:${sc};margin:2px 0"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${sc};margin-right:3px;vertical-align:middle;${a.status==='working'?'animation:pulse-border 1.5s infinite':''}"></span>${sl}</div>
-      <div style="font-size:8px;color:#64748b">${_esc(a.role||'')}</div>
-      ${total?`<div style="margin-top:4px;height:3px;background:#1e293b;border-radius:2px;overflow:hidden"><div style="height:100%;background:#3b82f6;border-radius:2px;width:${Math.round(done/total*100)}%"></div></div><div style="font-size:8px;color:#64748b;margin-top:1px">${done}/${total} 작업</div>`:''}
-      ${modelHtml}${costHtml}${liveHtml}${actBtns}
+    // Pulsing ring for working agents
+    const pulseRing=isWorking?`<div style="position:absolute;inset:-3px;border-radius:${isLg?13:11}px;border:2px solid ${sc};animation:comm-glow 1.5s ease-in-out infinite;pointer-events:none"></div>`:'';
+    return `<div onclick="_inlineOrgChartNodeClick(${JSON.stringify(a).replace(/"/g,'&quot;')})" style="position:relative;background:linear-gradient(145deg,${isWorking?'#1a1710,#2a2520':'#0c1220,#162035'});border:1px solid ${isWorking?'#92400e':'#1e3a5f'};border-radius:${isLg?12:10}px;padding:${isLg?'10px 14px':'7px 10px'};cursor:pointer;transition:all .25s;min-width:${isLg?120:95}px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.4)" onmouseover="this.style.transform='translateY(-3px) scale(1.02)';this.style.boxShadow='0 8px 24px rgba(0,0,0,.6)'" onmouseout="this.style.transform='';this.style.boxShadow='0 2px 12px rgba(0,0,0,.4)'">
+      ${pulseRing}
+      <div style="font-size:${isLg?26:20}px;margin-bottom:3px;filter:${isWorking?'brightness(1.2)':'none'}">${a.emoji||'🤖'}</div>
+      <div style="font-size:${isLg?12:10}px;font-weight:700;color:#f1f5f9;letter-spacing:.3px">${_esc(a.name)}</div>
+      <div style="font-size:8px;color:${sc};margin:3px 0;font-weight:600">${sl}</div>
+      <div style="font-size:7px;color:#64748b;margin-bottom:2px">${_esc(a.role||'')}</div>
+      ${total?`<div style="margin:4px auto 0;width:80%;height:4px;background:#0f172a;border-radius:2px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#3b82f6,#60a5fa);border-radius:2px;width:${Math.round(done/total*100)}%;transition:width .5s"></div></div><div style="font-size:7px;color:#64748b;margin-top:2px">${done}/${total}</div>`:''}
+      ${thinking?`<div style="font-size:7px;color:#fbbf24;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100px">⚡ ${_esc((thinking.promptPreview||'').substring(0,20))}...</div>`:''}
+      <div style="display:flex;gap:4px;margin-top:4px;justify-content:center;align-items:center;flex-wrap:wrap" onclick="event.stopPropagation()">
+        <span onclick="changeAgentModel('${a.id}')" style="font-size:7px;color:#475569;cursor:pointer;background:#0f172a;padding:1px 4px;border-radius:3px" title="모델 변경">🧠 ${_esc(modelName)}</span>
+        ${costVal>0?`<span style="font-size:7px;color:#94a3b8;background:#0f172a;padding:1px 4px;border-radius:3px">$${costVal.toFixed(4)}</span>`:''}
+      </div>
+      <div style="display:flex;gap:2px;margin-top:3px;justify-content:center" onclick="event.stopPropagation()">
+        <button onclick="insertMention('${_esc(a.name)}')" style="background:#0f172a;border:none;border-radius:3px;color:#60a5fa;font-size:7px;padding:2px 5px;cursor:pointer">@</button>
+        <button onclick="reactivateAgent('${currentCompany}','${a.id}','${_esc(a.emoji)} ${_esc(a.name)}')" style="background:#0f172a;border:none;border-radius:3px;color:#94a3b8;font-size:7px;padding:2px 5px;cursor:pointer">🔄</button>
+        <button onclick="deleteAgent('${currentCompany}','${a.id}','${_esc(a.emoji)} ${_esc(a.name)}')" style="background:#0f172a;border:none;border-radius:3px;color:#ef4444;font-size:7px;padding:2px 5px;cursor:pointer">✕</button>
+      </div>
     </div>`;
   };
-  // Connector with optional glow
-  const vConn=(fromId,toId)=>`<div style="display:flex;justify-content:center"><div class="${isCommActive(fromId,toId)?'comm-line-active':''}" style="width:2px;height:16px;background:#334155;transition:all .3s"></div></div>`;
+  // Connector with glow animation on active comm
+  const vConn=(fromId,toId)=>{
+    const active=isCommActive(fromId,toId);
+    return `<div style="display:flex;justify-content:center;position:relative">
+      <div style="width:${active?3:2}px;height:20px;background:${active?'linear-gradient(to bottom,#60a5fa,#3b82f6)':'linear-gradient(to bottom,rgba(51,65,85,.8),rgba(51,65,85,.3))'};transition:all .3s;border-radius:1px;${active?'box-shadow:0 0 8px #60a5fa,0 0 16px rgba(59,130,246,.3);animation:comm-glow 1.5s ease-in-out infinite':''}"></div>
+      ${active?'<div style="position:absolute;top:8px;left:50%;transform:translateX(-50);width:5px;height:5px;border-radius:50%;background:#60a5fa;animation:comm-glow 1s ease-in-out infinite"></div>':''}
+    </div>`;
+  };
 
   // Recursive tree renderer for sub-orgs
   const renderSubTree=(parentId)=>{
     const children=getChildren(parentId);
     if(!children.length)return '';
-    return `<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:4px">${children.map(ch=>{
+    return `<div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:2px">${children.map(ch=>{
       const subChildren=getChildren(ch.id);
       return `<div style="display:flex;flex-direction:column;align-items:center">
         ${vConn(parentId,ch.id)}
@@ -2933,10 +2942,12 @@ function renderInlineOrgChart(){
     }).join('')}</div>`;
   };
 
-  const masterCard=`<div style="text-align:center;margin-bottom:4px">
-    <div style="background:linear-gradient(135deg,#1e1b4b,#312e81);border:2px solid #818cf8;border-radius:14px;padding:10px 20px;display:inline-block;box-shadow:0 4px 12px rgba(99,102,241,.3)">
-      <div style="font-size:26px;margin-bottom:2px">👤</div>
-      <div style="font-size:12px;font-weight:700;color:#c7d2fe">마스터</div>
+  const masterCard=`<div style="text-align:center;margin-bottom:2px">
+    <div style="background:linear-gradient(145deg,#1e1b4b,#312e81);border:2px solid #818cf8;border-radius:14px;padding:10px 24px;display:inline-block;box-shadow:0 4px 16px rgba(99,102,241,.25);position:relative">
+      <div style="position:absolute;inset:-2px;border-radius:16px;border:1px solid rgba(129,140,248,.3);pointer-events:none"></div>
+      <div style="font-size:28px;margin-bottom:2px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))">👤</div>
+      <div style="font-size:12px;font-weight:700;color:#c7d2fe;letter-spacing:.5px">마스터</div>
+      <div style="font-size:7px;color:#818cf8;margin-top:2px">MASTER</div>
     </div>
   </div>`;
   const ceoConn=ceo?vConn('__master__','ceo'):'';
