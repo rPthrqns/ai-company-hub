@@ -7,30 +7,32 @@
 <!-- D3.js removed — org chart uses HTML cards now -->
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0a0a1a;--panel:#111827;--card:#1e293b;--border:#1e3a5f;--text:#e0e0e0;--dim:#64748b;--accent:#3b82f6;--accent2:#8b5cf6;--green:#00ff88;--yellow:#fbbf24;--red:#ef4444}
-body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
+:root{--bg:#0a0a0a;--panel:#0d0d0d;--card:#111111;--border:#1a1a1a;--text:#00ff41;--dim:#336633;--accent:#00d4ff;--accent2:#00ff41;--green:#00ff41;--yellow:#ffaa00;--red:#ff3333}
+body{font-family:'Courier New','SF Mono',Monaco,monospace;background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
+body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.03) 0px,rgba(0,0,0,.03) 1px,transparent 1px,transparent 2px);pointer-events:none;z-index:9999}
 .top-wrap{position:relative;z-index:100}
 .top-wrap .header,.top-wrap .toolbar{transition:transform .25s,opacity .25s}
 .top-wrap.collapsed .header,.top-wrap.collapsed .toolbar{transform:translateY(-100%);opacity:0;pointer-events:none;position:absolute;width:100%;top:0}
 .top-wrap.collapsed .toolbar{top:32px}
 .top-toggle{position:absolute;left:50%;transform:translateX(-50%);bottom:-14px;background:#1e293b;border:1px solid #334155;border-radius:0 0 6px 6px;padding:0 8px;cursor:pointer;font-size:10px;color:var(--dim);z-index:102;line-height:14px;transition:opacity .2s}
 .top-wrap.collapsed .top-toggle{bottom:auto;top:0;border-radius:0 0 6px 6px;position:fixed;left:50%;transform:translateX(-50%)}
-.header{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:6px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-.header h1{font-size:14px;display:flex;align-items:center;gap:6px}.header h1 span{color:#7b68ee}
+.header{background:#0a0a0a;padding:4px 16px;border-bottom:1px solid #1a1a1a;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:12px;display:flex;align-items:center;gap:6px;color:#00ff41;text-shadow:0 0 10px rgba(0,255,65,.3)}.header h1 span{color:#00d4ff}
 .header .sub{display:none}
 .hdr-right{display:flex;gap:10px;align-items:center}
-.toolbar{background:#0d1117;padding:5px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.toolbar{background:#0a0a0a;padding:4px 16px;border-bottom:1px solid #1a1a1a;display:flex;align-items:center;gap:10px}
 .company-tabs{display:flex;gap:6px;flex:1;overflow-x:auto}
-.company-tab{background:var(--card);border:1px solid transparent;border-radius:8px;padding:6px 14px;font-size:12px;color:var(--dim);cursor:pointer;white-space:nowrap;transition:all .15s;display:flex;align-items:center;gap:6px}
-.company-tab:hover{border-color:var(--accent);color:var(--text)}
-.company-tab.active{background:#1e3a5f;border-color:var(--accent);color:white}
-.company-tab .dot{width:6px;height:6px;border-radius:50%;background:var(--green)}
-.create-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:white;border:none;padding:7px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap}
+.company-tab{background:transparent;border:1px solid #1a1a1a;border-radius:2px;padding:4px 10px;font-size:11px;color:#336633;cursor:pointer;white-space:nowrap;transition:all .15s;display:flex;align-items:center;gap:4px;font-family:inherit}
+.company-tab:hover{border-color:#00ff41;color:#00ff41}
+.company-tab.active{background:#0a1a0a;border-color:#00ff41;color:#00ff41;text-shadow:0 0 8px rgba(0,255,65,.3)}
+.company-tab .dot{width:5px;height:5px;border-radius:50%;background:#00ff41;box-shadow:0 0 4px #00ff41}
+.create-btn{background:#111;color:#00ff41;border:1px solid #00ff41;padding:4px 10px;border-radius:2px;cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap;font-family:inherit}
+.create-btn:hover{background:#0a1a0a;text-shadow:0 0 8px rgba(0,255,65,.5)}
 
 /* Approval Banner */
-.approval-banner{background:linear-gradient(90deg,#78350f,#92400e);border-bottom:1px solid #b45309;padding:10px 24px;display:flex;align-items:center;gap:12px;animation:fadeIn .3s}
+.approval-banner{background:#1a1200;border-bottom:1px solid #332200;padding:6px 16px;display:flex;align-items:center;gap:8px;animation:fadeIn .3s;font-family:inherit}
 .approval-banner .ab-icon{font-size:18px}
-.approval-banner .ab-text{flex:1;font-size:12px;color:#fcd34d;line-height:1.4}
+.approval-banner .ab-text{flex:1;font-size:10px;color:#ffaa00;line-height:1.4}
 .approval-banner .ab-actions{display:flex;gap:6px;flex-shrink:0}
 .ab-btn{border:none;padding:5px 14px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s}
 .ab-btn.approve{background:#064e3b;color:#6ee7b7}.ab-btn.approve:hover{background:#065f46}
@@ -59,7 +61,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .main.with-goals{height:calc(100vh - 64px)}
 .main.with-approvals{height:calc(100vh - 64px - 40px)}
 .main.with-goals.with-approvals{height:calc(100vh - 64px - 40px)}
-.panel{background:var(--panel);border-radius:12px;padding:14px;border:1px solid #1e293b;display:flex;flex-direction:column;overflow:hidden}
+.panel{background:#0d0d0d;border-radius:4px;padding:8px;border:1px solid #1a1a1a;display:flex;flex-direction:column;overflow:hidden}
 .panel-title{font-size:12px;font-weight:600;color:var(--dim);margin-bottom:10px;display:flex;align-items:center;gap:5px}
 .agent-card{background:var(--card);border-radius:8px;padding:9px;margin-bottom:5px;transition:all .15s;border-left:3px solid #4b5563;cursor:pointer}
 .agent-card:hover{background:#253047;transform:translateX(2px)}
@@ -236,16 +238,21 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .preset-btn:hover{background:#253047;border-color:var(--accent);color:#e2e8f0}
 .sub-tab{background:transparent;border:none;padding:3px 6px;border-radius:4px;font-size:9px;color:var(--dim);cursor:pointer;transition:all .15s}
 .sub-tab:hover{color:var(--text)}
-.feed-item{display:flex;gap:6px;padding:4px 0;border-bottom:1px solid rgba(30,41,59,.5);animation:fadeIn .3s;align-items:flex-start}
-.feed-item .feed-time{font-size:8px;color:#475569;min-width:32px;flex-shrink:0;margin-top:2px}
-.feed-item .feed-emoji{font-size:12px;flex-shrink:0}
-.feed-item .feed-body{flex:1;min-width:0;line-height:1.4}
-.feed-item .feed-action{color:#60a5fa;font-weight:600}
-.feed-item .feed-target{color:#a78bfa}
-.feed-item .feed-text{color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-.feed-item.approval{background:rgba(251,191,36,.05);border-left:2px solid #fbbf24;padding-left:6px;border-radius:4px;margin:2px 0}
+.feed-item{display:flex;gap:0;padding:1px 0;animation:fadeIn .3s;align-items:flex-start;font-family:'Courier New',monospace;font-size:11px;line-height:1.5}
+.feed-item .feed-time{color:#444;min-width:42px;flex-shrink:0}
+.feed-item .feed-time::before{content:'[';color:#333}.feed-item .feed-time::after{content:']';color:#333}
+.feed-item .feed-emoji{display:none}
+.feed-item .feed-body{flex:1;min-width:0}
+.feed-item .feed-action{color:#00d4ff;font-weight:700}
+.feed-item .feed-action::before{content:'> ';color:#00ff41}
+.feed-item .feed-target{color:#ff6600}
+.feed-item .feed-text{color:#00ff41;opacity:.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.feed-item.approval{background:rgba(255,170,0,.05);border-left:2px solid #ffaa00;padding-left:6px;margin:2px 0}
 .feed-item.approval .feed-btns{display:flex;gap:3px;margin-top:3px}
-.feed-item.approval .feed-btns button{border:none;border-radius:3px;padding:2px 8px;font-size:9px;cursor:pointer}
+.feed-item.approval .feed-btns button{border:1px solid #333;border-radius:2px;padding:2px 8px;font-size:9px;cursor:pointer;font-family:inherit;background:#111;color:#00ff41}
+.feed-item.approval .feed-btns button:hover{background:#1a1a1a;border-color:#00ff41}
+@keyframes blink-cursor{0%,100%{opacity:1}50%{opacity:0}}
+.feed-item:first-child .feed-text::after{content:'█';animation:blink-cursor 1s infinite;color:#00ff41}
 .sub-tab.active{background:var(--accent);color:white}
 .emoji-opt:hover,.emoji-opt.selected{background:#253047;transform:scale(1.2)}
 .empty-state{text-align:center;padding:40px;color:var(--dim)}
@@ -1797,14 +1804,11 @@ function renderLiveFeed(){
   const c=companies.find(x=>x.id===currentCompany);
   let agentBar='';
   if(c&&c.agents){
-    agentBar='<div style="display:flex;gap:6px;padding:6px 0;border-bottom:1px solid #1e293b;margin-bottom:6px;flex-wrap:wrap">'+c.agents.map(a=>{
+    agentBar='<div style="padding:4px 0;border-bottom:1px solid #1a1a1a;margin-bottom:4px;color:#336633;font-size:10px"><span style="color:#444">AGENTS: </span>'+c.agents.map(a=>{
       const isThinking=agentThinking[`${currentCompany}:${a.id}`];
       const sc=isThinking?'#fbbf24':a.status==='active'?'#22c55e':'#64748b';
-      return `<div onclick="_inlineOrgChartNodeClick(${JSON.stringify(a).replace(/"/g,'&quot;')})" style="display:flex;align-items:center;gap:3px;padding:3px 8px;background:#0f172a;border:1px solid ${isThinking?'#92400e':'#1e293b'};border-radius:6px;cursor:pointer;font-size:9px;transition:all .15s${isThinking?';animation:comm-glow 1.5s ease-in-out infinite':''}" onmouseover="this.style.borderColor='${sc}'" onmouseout="this.style.borderColor='${isThinking?'#92400e':'#1e293b'}'">
-        <span>${a.emoji||'🤖'}</span>
-        <span style="color:#e2e8f0;font-weight:600">${_esc(a.name)}</span>
-        <span style="width:5px;height:5px;border-radius:50%;background:${sc}"></span>
-        ${isThinking?'<span style="color:#fbbf24;font-size:8px">생각 중</span>':''}
+      return `<div onclick="_inlineOrgChartNodeClick(${JSON.stringify(a).replace(/"/g,'&quot;')})" style="display:inline;cursor:pointer;font-family:'Courier New',monospace;font-size:10px;margin-right:8px" title="${_esc(a.role||'')}">
+        <span style="color:#444">[</span><span style="color:${sc}">${isThinking?'⚡':'●'}</span><span style="color:#00d4ff;font-weight:700">${_esc(a.name)}</span><span style="color:#444">]</span>${isThinking?'<span style="color:#ffaa00;font-size:9px">█</span>':''}
       </div>`;
     }).join('')+'</div>';
   }
