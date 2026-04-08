@@ -2595,18 +2595,40 @@ function connectSSE(){
     if(!_liveMonitorInterval){
       _liveMonitorInterval=setInterval(_updateLiveTimers,1000);
     }
-    // Re-render agent cards to show live bar
-    const c=companies.find(x=>x.id===d.cid);
-    if(c&&d.cid===currentCompany)renderCompanyUI(c);
+    // Show thinking status in chat
+    if(d.cid===currentCompany){
+      const typingEl=document.getElementById('typing');
+      const whoEl=document.getElementById('typing-who');
+      typingEl.classList.add('show');
+      const agentName=d.agent_id?.toUpperCase()||'에이전트';
+      whoEl.textContent=`${agentName} 생각 중...`;
+      // Update timer
+      const _thinkTimer=setInterval(()=>{
+        const elapsed=Math.round((Date.now()/1000)-d.started_at);
+        if(!agentThinking[key]){clearInterval(_thinkTimer);return;}
+        whoEl.textContent=`${agentName} 생각 중... (${elapsed}초)`;
+      },1000);
+      agentThinking[key]._timer=_thinkTimer;
+      // Org chart refresh
+      if(currentCenterTab==='orgchart')renderInlineOrgChart();
+    }
   }catch(err){console.warn('SSE agent_thinking parse error',err)}});
   es.addEventListener('agent_done',e=>{try{
     const d=JSON.parse(e.data);
     const key=`${d.cid}:${d.agent_id}`;
+    if(agentThinking[key]?._timer)clearInterval(agentThinking[key]._timer);
     delete agentThinking[key];
     if(Object.keys(agentThinking).length===0){
       clearInterval(_liveMonitorInterval);
       _liveMonitorInterval=null;
+      // Hide typing indicator
+      document.getElementById('typing').classList.remove('show');
+    } else {
+      // Update to show remaining agents
+      const remaining=Object.keys(agentThinking).map(k=>k.split(':')[1]?.toUpperCase()).join(', ');
+      document.getElementById('typing-who').textContent=`${remaining} 생각 중...`;
     }
+    if(d.cid===currentCompany&&currentCenterTab==='orgchart')renderInlineOrgChart();
   }catch(err){console.warn('SSE agent_done parse error',err)}});
   es.addEventListener('approval',e=>{try{
     const d=JSON.parse(e.data);
