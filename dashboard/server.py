@@ -3413,12 +3413,13 @@ def api_get_deliverables(cid: str):
     shared_dir = DATA / cid / '_shared' / 'deliverables'
     files = []
     if shared_dir.exists():
-        for f in sorted(shared_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        for f in sorted(shared_dir.rglob('*'), key=lambda x: x.stat().st_mtime, reverse=True):
             if f.is_file() and not f.name.startswith('.'):
                 size = f.stat().st_size
                 mtime = datetime.fromtimestamp(f.stat().st_mtime).strftime('%m-%d %H:%M')
-                files.append({'path': f'_shared/deliverables/{f.name}', 'size': size, 'modified': mtime})
-    return files[:50]
+                rel = str(f.relative_to(DATA / cid))
+                files.append({'path': rel, 'size': size, 'modified': mtime})
+    return files[:100]
 
 @app.get("/api/approvals/{cid}")
 def api_get_approvals(cid: str, status: str | None = None):
