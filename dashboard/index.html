@@ -938,7 +938,7 @@ function renderCompanyUI(c){
     // Live monitor bar for working agents
     const thinkKey=`${currentCompany}:${a.id}`;
     const thinking=agentThinking[thinkKey];
-    const liveHtml=thinking?`<div class="agent-live-bar">⚡ <span class="live-timer" id="lt-${a.id}">0s</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px;color:#94a3b8">${thinking.promptPreview||''}</span></div><div class="agent-watchdog"><div class="agent-watchdog-fill" id="wd-${a.id}" style="width:0%"></div></div>`:'';
+    const liveHtml=thinking?`<div class="agent-live-bar">⚡ <span class="live-timer" id="lt-${a.id}">0s</span><span style="color:#94a3b8">생각 중...</span></div>`:'';
     return `<div class="agent-card ${cls}" style="${dis};cursor:pointer;${border}" onclick="filterAgentChat('${a.id}','${a.name}','${a.emoji}')"><div class="agent-top"><span class="agent-emoji">${a.emoji}</span><span class="agent-name">${a.name}</span><span class="agent-tag ${cls}" style="margin-left:auto">${lbl}</span><span style="font-size:11px;color:var(--dim);cursor:pointer;margin-left:2px" onclick="event.stopPropagation();reactivateAgent('${currentCompany}','${a.id}','${a.emoji} ${a.name}')" title="재활성화">🔄</span><span style="font-size:11px;color:var(--dim);cursor:pointer;margin-left:2px" onclick="event.stopPropagation();deleteAgent('${currentCompany}','${a.id}','${a.emoji} ${a.name}')" title="삭제">✕</span></div><div class="agent-role">${a.role}</div><div class="agent-meta"><span>${done}/${total}</span></div>${costHtml}${liveHtml}${total?`<div class="pbar"><div class="pfill" style="width:${prog}%"></div></div>`:''}</div>`;
   }).join('');
   // Recurring tasks (right tab)
@@ -3125,7 +3125,7 @@ function renderInlineOrgChart(){
       <div style="font-size:8px;color:${sc};margin:3px 0;font-weight:600">${sl}</div>
       <div style="font-size:7px;color:#64748b;margin-bottom:2px">${_esc(a.role||'')}</div>
       ${total?`<div style="margin:4px auto 0;width:80%;height:4px;background:#0f172a;border-radius:2px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#3b82f6,#60a5fa);border-radius:2px;width:${Math.round(done/total*100)}%;transition:width .5s"></div></div><div style="font-size:7px;color:#64748b;margin-top:2px">${done}/${total}</div>`:''}
-      ${thinking?`<div style="font-size:7px;color:#fbbf24;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100px">⚡ ${_esc((thinking.promptPreview||'').substring(0,20))}...</div>`:''}
+      ${thinking?`<div style="font-size:7px;color:#fbbf24;margin-top:2px">⚡ 생각 중...</div>`:''}
       <div style="display:flex;gap:4px;margin-top:4px;justify-content:center;align-items:center;flex-wrap:wrap" onclick="event.stopPropagation()">
         <span onclick="changeAgentModel('${a.id}')" style="font-size:7px;color:#475569;cursor:pointer;background:#0f172a;padding:1px 4px;border-radius:3px" title="모델 변경">🧠 ${_esc(modelName)}</span>
         ${costVal>0?`<span style="font-size:7px;color:#94a3b8;background:#0f172a;padding:1px 4px;border-radius:3px">$${costVal.toFixed(4)}</span>`:''}
