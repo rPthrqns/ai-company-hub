@@ -37,6 +37,17 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .ev .btns{display:inline-flex;gap:2px;margin-left:3px}
 .ev .btns button{background:rgba(255,255,255,.1);border:none;border-radius:3px;color:inherit;font-size:8px;padding:1px 5px;cursor:pointer}
 .arrow{color:#334155;font-size:8px}
+.vtab{background:transparent;border:none;padding:4px 8px;border-radius:4px;font-size:10px;color:var(--dim);cursor:pointer}
+.vtab:hover{color:var(--text);background:#1a2332}
+.vtab.active{color:white;background:var(--accent)}
+.task-item{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:4px;margin-bottom:2px;font-size:10px;background:var(--card);border-left:3px solid var(--dim)}
+.task-item.done{border-left-color:var(--green);opacity:.7}
+.task-item.progress{border-left-color:var(--yellow)}
+.file-item{display:flex;align-items:center;gap:6px;padding:4px 6px;border-bottom:1px solid #1e293b;font-size:10px;cursor:pointer}
+.file-item:hover{background:#1a2332}
+.appr-card{background:var(--card);border-radius:6px;padding:8px;margin-bottom:6px;border-left:3px solid var(--yellow)}
+.appr-card .appr-btns{display:flex;gap:4px;margin-top:4px}
+.appr-card .appr-btns button{border:none;border-radius:4px;padding:3px 10px;font-size:9px;cursor:pointer}
 /* Chat */
 .messages{flex:1;overflow-y:auto;padding:8px}
 .msg{display:flex;gap:6px;padding:4px 0;animation:fadeIn .2s}
@@ -118,16 +129,39 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 
 <!-- Main -->
 <div class="main" id="main" style="display:none">
-  <!-- Swimlane -->
+  <!-- Left panel: tabs + content -->
   <div class="panel" style="padding:0">
-    <div class="toolbar">
-      <span>⚡ 타임라인</span>
+    <div style="display:flex;align-items:center;padding:3px 6px;border-bottom:1px solid var(--border);gap:2px;flex-shrink:0">
+      <button class="vtab active" onclick="switchView('timeline')">⚡ 타임라인</button>
+      <button class="vtab" onclick="switchView('tasks')">📋 작업</button>
+      <button class="vtab" onclick="switchView('approvals')">🔔 관리</button>
+      <button class="vtab" onclick="switchView('files')">📂 자료</button>
       <div style="margin-left:auto;display:flex;gap:3px">
-        <button onclick="openAgent()" class="btn">＋ 에이전트</button>
+        <button onclick="openAgent()" class="btn">＋</button>
         <a href="#" onclick="event.preventDefault();dl()" class="btn">📦</a>
       </div>
     </div>
-    <div id="swim" style="flex:1;overflow:auto"></div>
+    <!-- Views -->
+    <div id="v-timeline" style="flex:1;overflow:auto"></div>
+    <div id="v-tasks" style="flex:1;overflow:auto;padding:8px;display:none">
+      <div style="font-size:10px;font-weight:600;color:var(--dim);margin-bottom:6px">📋 칸반 대기열</div>
+      <div id="kanban"></div>
+      <div style="margin-top:12px;font-size:10px;font-weight:600;color:var(--dim);margin-bottom:6px">📋 계획 트리</div>
+      <div id="plan-tree"></div>
+    </div>
+    <div id="v-approvals" style="flex:1;overflow:auto;padding:8px;display:none">
+      <div style="font-size:10px;font-weight:600;color:var(--dim);margin-bottom:6px">🔔 기안결재</div>
+      <div id="approval-list"></div>
+    </div>
+    <div id="v-files" style="flex:1;overflow:auto;padding:8px;display:none">
+      <div style="display:flex;align-items:center;gap:4px;margin-bottom:6px">
+        <span style="font-size:10px;font-weight:600;color:var(--dim)">📂 결과물</span>
+        <a href="#" onclick="event.preventDefault();dl()" style="margin-left:auto;font-size:9px;color:var(--accent);text-decoration:none">📦 ZIP 다운로드</a>
+      </div>
+      <div id="file-list"></div>
+      <div style="margin-top:12px;font-size:10px;font-weight:600;color:var(--dim);margin-bottom:6px">📊 리포트</div>
+      <div id="report"></div>
+    </div>
   </div>
   <!-- Chat -->
   <div class="panel" style="padding:0">
@@ -236,10 +270,54 @@ async function extras(){
     tasks=await b.json();costs=await c.json();approvals=await a.json();renderBanner();renderStats()}catch(e){}
 }
 
+// ─── View Switching ───
+let curView='timeline';
+function switchView(v){
+  curView=v;
+  document.querySelectorAll('.vtab').forEach(el=>el.classList.toggle('active',el.textContent.includes(v==='timeline'?'타임라인':v==='tasks'?'작업':v==='approvals'?'관리':'자료')));
+  ['timeline','tasks','approvals','files'].forEach(id=>{const el=$('v-'+id);if(el)el.style.display=id===v?'':'none'});
+  if(v==='timeline')renderSwim();
+  if(v==='tasks')renderTasks();
+  if(v==='approvals')renderApprList();
+  if(v==='files')renderFiles();
+}
+function renderTasks(){
+  const k=$('kanban');if(!k)return;
+  if(!tasks.length){k.innerHTML='<div style="color:var(--dim);font-size:10px">작업 없음</div>';return}
+  k.innerHTML=tasks.map(t=>{const cls=t.status==='완료'?'done':t.status==='진행중'?'progress':'';
+    return`<div class="task-item ${cls}"><span>${t.status==='완료'?'✅':t.status==='진행중'?'🔄':'⬜'}</span><span style="flex:1">${_e(t.title)}</span><span style="color:var(--dim);font-size:8px">${_e(t.agent_id||'')}</span></div>`}).join('');
+  const p=$('plan-tree');if(p)p.innerHTML='<div style="color:var(--dim);font-size:9px">CEO가 자동 생성합니다</div>';
+}
+function renderApprList(){
+  const el=$('approval-list');if(!el)return;
+  const pend=approvals.filter(a=>a.status==='pending'&&(a.detail||a.title));
+  if(!pend.length){el.innerHTML='<div style="color:var(--dim);font-size:10px">대기 중인 결재 없음</div>';return}
+  el.innerHTML=pend.map(a=>`<div class="appr-card">
+    <div style="font-size:11px;font-weight:600;color:var(--text)">${_e(a.title||a.approval_type||'기안')}</div>
+    <div style="font-size:9px;color:var(--dim);margin:2px 0">${_e(a.from_agent||'')} · ${a.time||''}</div>
+    <div style="font-size:10px;color:var(--text);white-space:pre-wrap;max-height:80px;overflow-y:auto">${_e((a.detail||'').substring(0,300))}</div>
+    <div class="appr-btns">
+      <button onclick="resolve('${a.id}','approved')" style="background:#064e3b;color:#6ee7b7">✅ 승인</button>
+      <button onclick="resolve('${a.id}','rejected')" style="background:#7f1d1d;color:#fca5a5">❌ 반려</button>
+    </div>
+  </div>`).join('');
+}
+function renderFiles(){
+  const el=$('file-list');if(!el||!cur)return;
+  fetch(`/api/deliverables/${cur}`).then(r=>r.json()).then(files=>{
+    if(!files.length){el.innerHTML='<div style="color:var(--dim);font-size:10px">결과물 없음</div>';return}
+    el.innerHTML=files.slice(0,30).map(f=>{
+      const ext=f.path.split('.').pop().toLowerCase();
+      const icon=ext==='md'?'📝':ext==='png'?'🖼️':ext==='json'?'📋':'📄';
+      return`<div class="file-item" onclick="window.open('/api/file/${cur}/${f.path}','_blank')"><span>${icon}</span><span style="flex:1;color:#60a5fa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_e(f.path)}</span><span style="color:var(--dim);font-size:8px">${f.modified||''}</span></div>`}).join('');
+  }).catch(()=>{el.innerHTML='<div style="color:var(--dim);font-size:10px">로드 실패</div>'});
+  const rp=$('report');if(rp)fetch(`/api/newspaper/${cur}`).then(r=>r.json()).then(d=>{rp.innerHTML=d.newspaper?`<div style="font-size:10px;color:var(--text);white-space:pre-wrap;line-height:1.5;background:var(--card);border-radius:6px;padding:8px">${_e(d.newspaper)}</div>`:'<div style="color:var(--dim);font-size:10px">리포트 없음</div>'}).catch(()=>{});
+}
+
 // ─── Swimlane ───
 function addSw(id,type,text,extra){if(!swim[id])swim[id]=[];swim[id].push({type,text:text||'',t:new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),extra:extra||{}});if(swim[id].length>12)swim[id].shift();renderSwim()}
 function renderSwim(){
-  const el=$('swim');if(!el)return;
+  const el=$('v-timeline');if(!el)return;
   const c=cos.find(x=>x.id===cur);
   if(!c||!c.agents){el.innerHTML='<div style="color:var(--dim);text-align:center;padding:40px;font-size:11px">회사를 선택하세요</div>';return}
   let h='';
