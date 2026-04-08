@@ -344,14 +344,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 <div class="main" id="main-content" style="display:none">
   <!-- Main: Tabbed panel (조직도 + 대기열·결재·연혁·정기·결과물·리포트) -->
   <div class="panel" style="padding:0;overflow:hidden">
-    <div class="center-tabs">
-      <button class="center-tab active" onclick="switchCenterTab('orgchart')">⚡ 타임라인</button>
-      <button class="center-tab" onclick="switchCenterTab('manage')">📋 관리</button>
-      <button class="center-tab" onclick="switchCenterTab('docs')">📂 자료</button>
-    </div>
-    <div class="center-panel-content">
-      <!-- ① 타임라인 수영장 -->
-      <div class="tab-pane active" id="tab-orgchart" style="position:relative;flex-direction:column">
+    <div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+      <!-- 수영장 (항상 표시) -->
+      <div style="display:flex;flex-direction:column;flex:1;position:relative;overflow:hidden">
         <svg id="agent-graph" style="display:none"></svg>
         <svg id="org-inline-svg" style="display:none"></svg>
         <div id="live-feed" style="display:none"></div>
