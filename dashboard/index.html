@@ -762,13 +762,27 @@ function skipLanguageSetup(){
 }
 async function _loadI18n(lang){
   try{
-    const res=await fetch(`/api/i18n/${lang}`);
-    if(res.ok){
-      const strings=await res.json();
-      if(!UI[lang])UI[lang]={};
-      Object.assign(UI[lang],strings);
-      currentLang=lang;
-      applyLang();
+    const [langRes,enRes]=await Promise.all([fetch(`/api/i18n/${lang}`),fetch('/api/i18n/en')]);
+    if(!langRes.ok)return;
+    const strings=await langRes.json();
+    const enStrings=enRes.ok?await enRes.json():{};
+    // Fill missing keys with English fallback
+    const missingKeys=[];
+    for(const k of Object.keys(enStrings)){
+      if(k.startsWith('_'))continue;
+      if(!strings[k]){strings[k]=enStrings[k];missingKeys.push(k);}
+    }
+    if(!UI[lang])UI[lang]={};
+    Object.assign(UI[lang],strings);
+    currentLang=lang;
+    applyLang();
+    // Auto-translate missing keys in background
+    if(missingKeys.length>0&&lang!=='en'){
+      console.log(`[i18n] ${missingKeys.length} new keys, translating...`);
+      const missing={};missingKeys.forEach(k=>missing[k]=enStrings[k]);
+      fetch('/api/i18n/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang,missing})}).then(r=>r.json()).then(d=>{
+        if(d.ok){Object.assign(UI[lang],d.translated);applyLang();console.log(`[i18n] ${missingKeys.length} keys patched`);}
+      }).catch(()=>{});
     }
   }catch(e){console.warn('i18n load failed',e)}
 }

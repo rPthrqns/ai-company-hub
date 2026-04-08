@@ -4204,6 +4204,43 @@ async def api_i18n_generate(request: Request):
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.post("/api/i18n/patch")
+async def api_i18n_patch(request: Request):
+    """Translate only missing keys and merge into existing language file."""
+    body = await request.json()
+    lang = body.get('lang', '')
+    missing = body.get('missing', {})
+    if not lang or not missing:
+        return JSONResponse({"error": "lang and missing required"}, status_code=400)
+    keys_json = json.dumps(missing, indent=2, ensure_ascii=False)
+    lang_name_map = {'ko':'Korean','en':'English','ja':'Japanese','zh':'Chinese','es':'Spanish','fr':'French','de':'German','pt':'Portuguese','ru':'Russian','ar':'Arabic','hi':'Hindi','th':'Thai','vi':'Vietnamese','id':'Indonesian','tr':'Turkish','it':'Italian'}
+    lang_name = lang_name_map.get(lang, lang)
+    prompt = f"Translate to {lang_name}. Return ONLY JSON, same keys, keep emoji. \n\n{keys_json}"
+    def _gen():
+        try:
+            result = RUNTIME.run('main', f'i18n-patch-{lang}', prompt, timeout=45)
+            cleaned = result.strip()
+            if cleaned.startswith('```'): cleaned = cleaned.split('\n',1)[-1].rsplit('```',1)[0].strip()
+            try: translated = json.loads(cleaned)
+            except: 
+                m = re.search(r'\{[\s\S]*\}', result)
+                if not m: return {'ok':False}
+                translated = json.loads(m.group())
+            # Merge into existing file
+            f = I18N_DIR / f"{lang}.json"
+            if f.exists():
+                existing = json.loads(f.read_text(encoding='utf-8'))
+                existing.update(translated)
+                f.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding='utf-8')
+            print(f"[i18n] Patched {lang}: +{len(translated)} keys")
+            return {'ok':True,'translated':translated}
+        except Exception as e:
+            return {'ok':False,'error':str(e)}
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        try: return pool.submit(_gen).result(timeout=60)
+        except: return JSONResponse({"error":"timeout"}, status_code=500)
+
 # ── Static files (must be last — catches everything else) ──────────────────
 
 app.mount("/", StaticFiles(directory=str(BASE / "dashboard"), html=True), name="static")
