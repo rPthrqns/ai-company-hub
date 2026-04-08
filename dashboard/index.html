@@ -720,33 +720,20 @@ function _esc(s){if(!s)return '';const d=document.createElement('div');d.textCon
 
 // ─── Language Setup (first visit) ───
 async function _checkLanguageSetup(){
+  const overlay=document.getElementById('lang-setup-overlay');
   try{
-    const res=await fetch('/api/i18n/languages');
-    const data=await res.json();
     const savedLang=localStorage.getItem('hub-lang');
-    const I18N_VERSION='2'; // Bump this when UI strings change
-    const savedVersion=localStorage.getItem('hub-i18n-version');
-    const needsSetup=!savedLang||!data.languages.includes(savedLang)||(savedVersion!==I18N_VERSION&&savedLang!=='en');
-    if(needsSetup&&!savedLang){
-      // First visit — show setup
-      document.getElementById('lang-setup-overlay').style.display='flex';
+    if(!savedLang){
+      // First visit — show language setup
+      overlay.style.display='flex';
       document.getElementById('lang-setup-input').focus();
-    }else if(needsSetup&&savedLang&&savedLang!=='en'){
-      // Version mismatch — regenerate in background (don't block page load)
-      document.getElementById('lang-setup-overlay').style.display='none';
-      if(savedLang&&data.languages.includes(savedLang))await _loadI18n(savedLang); // load existing first
-      fetch('/api/i18n/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({language:savedLang})})
-        .then(r=>r.json()).then(d2=>{if(d2.ok){localStorage.setItem('hub-i18n-version',I18N_VERSION);_loadI18n(d2.lang_code);}})
-        .catch(()=>{});
-    }else{
-      document.getElementById('lang-setup-overlay').style.display='none';
-      if(savedLang&&data.languages.includes(savedLang)){
-        await _loadI18n(savedLang);
-        localStorage.setItem('hub-i18n-version',I18N_VERSION);
-      }
+      return;
     }
+    overlay.style.display='none';
+    // Load saved language (fast — no LLM call)
+    await _loadI18n(savedLang);
   }catch(e){
-    document.getElementById('lang-setup-overlay').style.display='none';
+    if(overlay)overlay.style.display='none';
   }
 }
 async function generateLanguage(){
@@ -803,14 +790,8 @@ async function _loadI18n(lang){
     Object.assign(UI[lang],strings);
     currentLang=lang;
     applyLang();
-    // Auto-translate missing keys in background
-    if(missingKeys.length>=3&&lang!=='en'){  // Only patch if 3+ keys missing (avoid LLM call for 1-2 keys)
-      console.log(`[i18n] ${missingKeys.length} new keys, translating...`);
-      const missing={};missingKeys.forEach(k=>missing[k]=enStrings[k]);
-      fetch('/api/i18n/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang,missing})}).then(r=>r.json()).then(d=>{
-        if(d.ok){Object.assign(UI[lang],d.translated);applyLang();console.log(`[i18n] ${missingKeys.length} keys patched`);}
-      }).catch(()=>{});
-    }
+    // Missing keys use English fallback (no LLM call on page load)
+    if(missingKeys.length>0)console.log(`[i18n] ${missingKeys.length} keys using English fallback`);
   }catch(e){console.warn('i18n load failed',e)}
 }
 // Run on page load
