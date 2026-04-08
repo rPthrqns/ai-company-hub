@@ -2039,7 +2039,9 @@ def nudge_agent(cid, text, target):
                 _ESCALATION_COUNTS.pop(f"{cid}:{aid}", None)
                 lines = reply_raw.split('\n')
                 clean = '\n'.join(l for l in lines
-                                  if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
+                                  if not l.startswith('[') and not l.startswith('(agent')
+                                  and not l.startswith('===') and not l.startswith('---')
+                                  and l.strip()).strip()
                 # Guardrail: require substance + structure
                 prep_patterns = ['파악하겠', '확인하겠', '상황을 파악', '상황부터', '먼저 현재', 'check', 'assess', 'analyze first', 'let me']
                 is_prep = len(clean) < 100 and any(p in clean.lower() for p in prep_patterns)
@@ -4300,6 +4302,61 @@ async def api_i18n_patch(request: Request):
     with concurrent.futures.ThreadPoolExecutor() as pool:
         try: return pool.submit(_gen).result(timeout=60)
         except: return JSONResponse({"error":"timeout"}, status_code=500)
+
+# ─── Deliverables Download API ─────────────────────────────────────────────
+
+@app.get("/api/download/{cid}")
+def api_download_deliverables(cid: str):
+    """Download all deliverables as ZIP."""
+    import zipfile, io
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(status_code=404, detail="not found")
+    deliverables_dir = DATA / cid / "_shared" / "deliverables"
+    if not deliverables_dir.exists():
+        raise HTTPException(status_code=404, detail="no deliverables")
+    # Create ZIP in memory
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for f in deliverables_dir.rglob('*'):
+            if f.is_file():
+                arcname = str(f.relative_to(deliverables_dir))
+                zf.write(f, arcname)
+    buf.seek(0)
+    from fastapi.responses import Response
+    return Response(
+        content=buf.getvalue(),
+        media_type='application/zip',
+        headers={'Content-Disposition': f'attachment; filename="{cid}_deliverables.zip"'}
+    )
+
+@app.get("/api/download-all/{cid}")
+def api_download_all(cid: str):
+    """Download entire company workspace as ZIP (deliverables + workspaces + shared)."""
+    import zipfile, io
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(status_code=404, detail="not found")
+    company_dir = DATA / cid
+    if not company_dir.exists():
+        raise HTTPException(status_code=404, detail="no data")
+    buf = io.BytesIO()
+    skip = {'.db', '.db-journal', '.db-wal', '.lock'}
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for f in company_dir.rglob('*'):
+            if f.is_file() and f.suffix not in skip:
+                arcname = str(f.relative_to(company_dir))
+                try:
+                    zf.write(f, arcname)
+                except Exception:
+                    pass
+    buf.seek(0)
+    from fastapi.responses import Response
+    return Response(
+        content=buf.getvalue(),
+        media_type='application/zip',
+        headers={'Content-Disposition': f'attachment; filename="{cid}_workspace.zip"'}
+    )
 
 # ── Static files (must be last — catches everything else) ──────────────────
 

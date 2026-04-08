@@ -450,7 +450,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
           <div id="wiki-panel" style="flex:1;overflow-y:auto;padding:8px"></div>
         </div>
         <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
-          <div style="padding:6px 10px;border-bottom:1px solid #1e293b;font-size:10px;font-weight:600;color:var(--dim)">📂 결과물 · 🔄 정기작업</div>
+          <div style="padding:6px 10px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:var(--dim)">📂 결과물 · 🔄 정기작업
+            <a href="#" onclick="event.preventDefault();downloadDeliverables()" style="margin-left:auto;background:#064e3b;color:#6ee7b7;border:none;border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer;text-decoration:none">📦 ZIP</a>
+            <a href="#" onclick="event.preventDefault();downloadAll()" style="background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer;text-decoration:none">💾 전체</a>
+          </div>
           <div style="flex:1;overflow-y:auto;padding:8px">
             <div id="deliverables-panel"></div>
             <div style="margin-top:8px;border-top:1px solid #1e293b;padding-top:8px" id="task-list"></div>
@@ -1875,6 +1878,10 @@ async function deleteMilestone(mid){
   await fetch(`/api/milestone/${currentCompany}/${mid}`,{method:'DELETE'});
   toast('🗑 삭제됨');renderMilestones();
 }
+
+// ─── Download ───
+function downloadDeliverables(){if(!currentCompany)return;window.open(`/api/download/${currentCompany}`,'_blank');}
+function downloadAll(){if(!currentCompany)return;window.open(`/api/download-all/${currentCompany}`,'_blank');}
 
 // ─── Live Activity Feed ───
 const _feedItems=[];
