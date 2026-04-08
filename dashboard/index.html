@@ -834,13 +834,14 @@ function renderLangSwitch(){} // removed — i18n auto-setup handles language
 function switchLang(lang){currentLang=lang;localStorage.setItem('hub-lang',lang);applyLang();}
 
 function applyLang(){
+  const lang=UI[currentLang]||UI['en']||UI['ko']||{};
   document.querySelectorAll('[data-i18n]').forEach(el=>{
     const k=el.getAttribute('data-i18n');
-    if(UI[currentLang][k]) el.textContent=UI[currentLang][k];
+    if(lang[k]) el.textContent=lang[k];
   });
   document.querySelectorAll('[data-i18n-ph]').forEach(el=>{
     const k=el.getAttribute('data-i18n-ph');
-    if(UI[currentLang][k]) el.placeholder=UI[currentLang][k];
+    if(lang[k]) el.placeholder=lang[k];
   });
   if(currentCompany){
     document.getElementById('chat-title').textContent=t('chatTitle');
@@ -2548,7 +2549,9 @@ async function deleteTask(taskId,title){
   }catch(e){toast('삭제 실패')}
 }
 
-renderLangSwitch();applyLang();load();
+try{renderLangSwitch();}catch(e){}
+try{applyLang();}catch(e){}
+load();
 
 // SSE for real-time updates
 // ─── Plan Task Tree ───
