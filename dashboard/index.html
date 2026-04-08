@@ -1071,9 +1071,18 @@ function renderApprovals(){
     if(panel)panel.innerHTML='<div style="padding:12px;color:var(--dim);font-size:11px;text-align:center">📋 대기 중인 기안이 없습니다</div>';
     updateMainHeight();return;
   }
-  // Banner: compact notification
+  // Banner: show first pending with approve/reject + link to manage
   banner.style.display='flex';
-  banner.innerHTML=`<span class="ab-icon">📋</span><div class="ab-text"><strong>기안 ${pending.length}건</strong> 결재 대기 중</div><div class="ab-actions"><button class="ab-btn approve" onclick="switchCenterTab('manage')">확인</button></div>`;
+  const first=pending[0];
+  const bannerTitle=_esc(first.title||first.approval_type||'기안');
+  const bannerDetail=_esc((first.detail||'').substring(0,60));
+  banner.innerHTML=`<span class="ab-icon">📋</span>
+    <div class="ab-text"><strong>${bannerTitle}</strong>${pending.length>1?` 외 ${pending.length-1}건`:''} · ${first.from_emoji||''} ${_esc(first.from_agent||'')} · ${bannerDetail}${(first.detail||'').length>60?'...':''}</div>
+    <div class="ab-actions">
+      <button class="ab-btn approve" onclick="resolveApproval('${first.id}','approved')">✅ 승인</button>
+      <button class="ab-btn reject" onclick="resolveApproval('${first.id}','rejected')">❌ 반려</button>
+      <button class="ab-btn" onclick="switchCenterTab('manage')" style="background:#1e293b;color:#94a3b8">상세</button>
+    </div>`;
   // Panel: full approval cards
   if(panel){
     const catIcon={예산:'💰',구매:'🛒',프로젝트:'📁',인사:'👥',정책:'📜',기타:'📎',general:'📋',budget:'💰',purchase:'🛒',project:'📁',hr:'👥',policy:'📜'};
