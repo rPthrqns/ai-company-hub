@@ -2048,28 +2048,70 @@ def nudge_agent(cid, text, target):
             if reply_raw and 'No reply from agent' not in reply_raw:
                 _ESCALATION_COUNTS.pop(f"{cid}:{aid}", None)
                 lines = reply_raw.split('\n')
-                clean = '\n'.join(l for l in lines
-                                  if not l.startswith('[') and not l.startswith('(agent')
-                                  and not l.startswith('===') and not l.startswith('---')
-                                  and l.strip()).strip()
-                # Guardrail: require substance + structure
-                prep_patterns = ['파악하겠', '확인하겠', '상황을 파악', '상황부터', '먼저 현재', 'check', 'assess', 'analyze first', 'let me']
-                is_prep = len(clean) < 100 and any(p in clean.lower() for p in prep_patterns)
-                # Leader must delegate or show results
-                is_leader_response = is_leader and clean
-                needs_delegation = is_leader_response and not re.search(r'@[A-Za-z]', clean) and '## Delegations' not in clean and '## Results' not in clean and len(clean) < 200
-                if clean and (is_prep or needs_delegation):
-                    print(f"[guardrail] {agent_id} prep response rejected ({len(clean)}ch), retrying with enforcement...")
-                    enforce_prompt = f"Your previous response was rejected: '{clean[:60]}'. This is NOT acceptable. You MUST follow the OUTPUT FORMAT and provide ## Actions Taken and ## Results sections with REAL content. Do it NOW."
+                # Keep system command lines ([TASK_ADD:, [APPROVAL:, etc.) but strip metadata lines
+                def _is_content_line(l):
+                    stripped = l.strip()
+                    if not stripped:
+                        return False
+                    if l.startswith('(agent'):
+                        return False
+                    if l.startswith('===') or l.startswith('---'):
+                        return False
+                    # Strip metadata lines starting with [ but NOT system commands
+                    if l.startswith('[') and not re.match(r'\[(TASK_|APPROVAL:|CRON_|TASK_DONE)', l):
+                        return False
+                    return True
+                clean = '\n'.join(l for l in lines if _is_content_line(l)).strip()
+                # Guardrail: require action — commands or @mentions (no free passes for long text)
+                prep_patterns = ['파악하겠', '확인하겠', '상황을 파악', '상황부터', '먼저 현재', 'check', 'assess', 'analyze first', 'let me',
+                                 '검토하겠', '분석하겠', '살펴보겠', '조사하겠', '정리하겠', '계획을 세우', '방안을 마련']
+                is_prep = len(clean) < 150 and any(p in clean.lower() for p in prep_patterns)
+                has_command = bool(re.search(r'\[TASK_|\[APPROVAL:|\[CRON_|\[TASK_DONE', clean))
+                has_mention = bool(re.search(r'@[A-Za-z]', clean))
+                has_action = has_command or has_mention
+                if clean and (is_prep or (not has_action)):
+                    print(f"[guardrail] {agent_id} response rejected ({len(clean)}ch cmd={has_command} mention={has_mention}), retrying...")
+                    if is_leader:
+                        other_agents = [a['id'].upper() for a in (company.get('agents',[]) if company else []) if a['id'] != aid][:4]
+                        agent_list = ', '.join(f'@{a}' for a in other_agents) if other_agents else '@CTO, @CMO'
+                        enforce_prompt = (
+                            f"⚠️ SYSTEM REJECTION: Your response had ZERO system commands.\n"
+                            f"You MUST include commands. Copy-paste these formats exactly:\n\n"
+                            f"To delegate: {agent_list} (describe the task)\n"
+                            f"To add task: [TASK_ADD:작업명:high]\n"
+                            f"To complete: [TASK_DONE:작업명]\n"
+                            f"To request approval: [APPROVAL:category:title:detail]\n\n"
+                            f"Re-do your response. Include at least 1 @mention AND 1 [TASK_ADD:...] command."
+                        )
+                    else:
+                        leader = get_leader_id(company).upper() if company else 'CEO'
+                        enforce_prompt = (
+                            f"⚠️ SYSTEM REJECTION: Your response had ZERO system commands.\n"
+                            f"You MUST report results using these formats:\n\n"
+                            f"To report: @{leader} (your results summary)\n"
+                            f"To complete task: [TASK_DONE:작업명]\n"
+                            f"To request approval: [APPROVAL:category:title:detail]\n\n"
+                            f"Re-do your response. Include @{leader} mention AND [TASK_DONE:...] command."
+                        )
                     try:
                         retry_raw = RUNTIME.run(agent_id, session_id, enforce_prompt, timeout=AGENT_RUN_TIMEOUT)
                         if retry_raw and len(retry_raw) > 80:
                             lines = retry_raw.split('\n')
-                            clean = '\n'.join(l for l in lines if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
-                            print(f"[guardrail] {agent_id} enforced reply={len(clean)}chars")
+                            retry_clean = '\n'.join(l for l in lines if _is_content_line(l)).strip()
+                            # Check if retry actually has commands now
+                            retry_has_cmd = bool(re.search(r'\[TASK_|\[APPROVAL:|\[CRON_', retry_clean))
+                            retry_has_mention = bool(re.search(r'@[A-Za-z]', retry_clean))
+                            if retry_has_cmd or retry_has_mention:
+                                clean = retry_clean
+                                print(f"[guardrail] {agent_id} enforced OK: {len(clean)}ch cmd={retry_has_cmd} mention={retry_has_mention}")
+                            else:
+                                # Second retry failed too — accept but log warning
+                                clean = retry_clean
+                                print(f"[guardrail] {agent_id} 2nd attempt still no commands ({len(clean)}ch), accepting anyway")
                         else:
                             clean = ''
-                    except Exception:
+                    except Exception as e:
+                        print(f"[guardrail] {agent_id} retry error: {e}")
                         clean = ''
                 # Save to memory stream
                 if clean and len(clean) > 20:
