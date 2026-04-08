@@ -322,6 +322,7 @@ def _ensure_company_db(cid: str):
         "ALTER TABLE approvals ADD COLUMN current_step INTEGER DEFAULT 0",
         "ALTER TABLE approvals ADD COLUMN comments TEXT DEFAULT '[]'",
         "ALTER TABLE approvals ADD COLUMN updated_at TEXT DEFAULT ''",
+        "ALTER TABLE approvals ADD COLUMN options TEXT DEFAULT ''",
     ]:
         try:
             conn.execute(stmt)

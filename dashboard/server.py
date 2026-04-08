@@ -2742,25 +2742,29 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if master_mention:
             master_request = master_mention.group(1).strip()
             text = re.sub(r'@\uB9C8\uC2A4\uD130 ?', '', text).strip()
-            # @마스터 보고 → 채팅 표시 + 결재성 내용 자동 감지
+            # @마스터 보고 → 채팅에만 표시 (결재 자동 생성 안함)
             chat_msg = {"from": from_agent, "emoji": emoji, "text": f"@마스터 {master_request}", "time": time_str, "type": "agent", "mention": True}
             append_chat(cid, chat_msg, broadcast=True)
             append_activity(cid, {"time": time_str, "agent": from_agent, "text": f"@마스터 {master_request[:50]}{'...' if len(master_request)>50 else ''}"})
             print(f"[master] {from_agent} → @마스터: {master_request[:60]}")
-            # Auto-detect approval-worthy content (but skip if it's a response to our approval)
-            approval_keywords = ['승인', '결재', '기안', '요청', '허가', '구매', '예산', '채용', '계약', 'approval', 'budget', 'purchase', 'hire']
-            is_approval_response = '결재 응답' in master_request or 'escalation' in master_request.lower()
-            if not is_approval_response and any(kw in master_request.lower() for kw in approval_keywords) and len(master_request) > 20:
-                # Extract title from first line
-                title = master_request.split('\n')[0].strip()[:50]
+            # Detect choice pattern (A/B/C/D options) → create approval with options
+            choice_pattern = re.findall(r'(?:^|\n)\s*(?:옵션\s*)?([A-D])[.):]\s*(.+?)(?:\n|$)', master_request)
+            if not choice_pattern:
+                choice_pattern = re.findall(r'(?:^|\n)\s*(?:Option\s*)?([A-D])[.):]\s*(.+?)(?:\n|$)', master_request, re.IGNORECASE)
+            if not choice_pattern:
+                choice_pattern = re.findall(r'(?:^|\n)\s*(\d)[.):]\s*(.+?)(?:\n|$)', master_request)
+            if len(choice_pattern) >= 2:
+                title = master_request.split('\n')[0].strip()[:60]
+                options = [{"key": k.strip(), "label": v.strip()[:80]} for k, v in choice_pattern]
                 append_approval(cid, {
                     'id': str(uuid.uuid4())[:8], 'from_agent': from_agent, 'from_emoji': emoji,
-                    'approval_type': '기안', 'category': 'general', 'title': title,
+                    'approval_type': 'choice', 'category': 'decision', 'title': title,
                     'detail': master_request[:500],
+                    'options': json.dumps(options, ensure_ascii=False),
                     'status': 'pending', 'time': time_str,
                     'created_at': datetime.now().isoformat()
                 })
-                print(f"[auto-approval] {from_agent}: {title[:40]}")
+                print(f"[choice] {from_agent}: {title[:40]} ({len(options)} options)")
         
         # 에이전트 응답에서 멘션 부분과 일반 부분 분리
         has_mentions = bool(re.search(r'@([A-Za-z0-9]+)', text))
