@@ -74,8 +74,11 @@ class OpenClawRuntime(AgentRuntime):
                                     texts = [c.get('text', '') for c in msg.get('content', []) if c.get('type') == 'text']
                                     candidate = '\n'.join(texts).strip() if texts else ''
                                     if candidate and candidate != 'NO_REPLY' and len(candidate) > 5:
-                                        result = candidate
-                                        break
+                                        if len(candidate) > 80:
+                                            result = candidate  # Substantial response
+                                            break
+                                        elif not result:
+                                            result = candidate  # Short, keep polling for better
                         except _json.JSONDecodeError:
                             pass
                 except Exception:

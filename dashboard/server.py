@@ -2013,6 +2013,11 @@ def nudge_agent(cid, text, target):
                 lines = reply_raw.split('\n')
                 clean = '\n'.join(l for l in lines
                                   if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
+                # Skip useless prep responses
+                prep_patterns = ['파악하겠', '확인하겠', '상황을 파악', '상황부터', 'check', 'assess', 'analyze first', 'let me']
+                if clean and len(clean) < 50 and any(p in clean.lower() for p in prep_patterns):
+                    print(f"[nudge] {agent_id} prep response skipped: {clean[:40]}")
+                    clean = ''
                 if clean:
                     save_agent_memory(cid, aid, clean)
                     process_task_commands(cid, clean, aid)
