@@ -34,7 +34,8 @@ from db import (init_db, migrate_from_json, db_get_company, db_save_company, db_
                db_get_votes, db_add_vote, db_cast_vote,
                db_add_audit, db_get_audit,
                db_get_contacts, db_add_contact, db_delete_contact,
-               db_add_memory, db_get_memories)
+               db_add_memory, db_get_memories,
+               db_get_priorities, db_set_priority, db_init_default_priorities, PRIORITY_CATEGORIES)
 
 # ─── Configuration (env overridable) ───
 PORT = int(os.environ.get('PORT', 3000))
@@ -1754,6 +1755,174 @@ def generate_newspaper(cid):
     return brief
 
 
+
+# ─── Event Narrative (Dwarf-Fortress style storytelling) ───
+
+_narrative_cache = {}  # {cid: (events, timestamp)}
+
+def generate_narrative(cid):
+    """Generate template-based narrative events from company data.
+    Returns list of {icon, text, type, time} dicts, max 15 items. Cached 30s."""
+    import re as _re_narr
+
+    cache_now = time.time()
+    cached = _narrative_cache.get(cid)
+    if cached and cache_now - cached[1] < 30:
+        return cached[0]
+
+    company = get_company(cid)
+    if not company:
+        return []
+
+    events = []
+    today_str = datetime.now().strftime('%Y-%m-%d')
+
+    # 1. Parse recent chat messages for delegations and user orders
+    chat = company.get('chat', [])
+    recent_chat = chat[-20:] if len(chat) > 20 else chat
+    for m in recent_chat:
+        mtype = m.get('type', '')
+        sender = m.get('from', '')
+        text = m.get('text', '') or ''
+        mtime = m.get('time', '')
+
+        if mtype == 'user':
+            mentions = _re_narr.findall(r'@(\w+)', text)
+            if mentions:
+                clean_text = _re_narr.sub(r'@\w+\s*', '', text).strip()
+                summary = clean_text[:40] + ('...' if len(clean_text) > 40 else '')
+                for target in mentions:
+                    events.append({
+                        'icon': '📋', 'type': 'delegation',
+                        'text': f"CEO가 {target}에게 '{summary}'을(를) 지시했다",
+                        'time': mtime
+                    })
+            else:
+                summary = text[:40] + ('...' if len(text) > 40 else '')
+                events.append({
+                    'icon': '🗣️', 'type': 'action',
+                    'text': f"CEO가 '{summary}'을(를) 지시했다",
+                    'time': mtime
+                })
+
+        elif mtype == 'agent' and sender:
+            agent_mentions = _re_narr.findall(r'@(\w+)', text)
+            if agent_mentions:
+                targets = ', '.join(agent_mentions[:2])
+                clean = _re_narr.sub(r'@\w+', '', text).strip()
+                summary = clean[:30] + ('...' if len(clean) > 30 else '')
+                events.append({
+                    'icon': '🔗', 'type': 'delegation',
+                    'text': f"{sender}가 {targets}에게 '{summary}'을(를) 위임했다",
+                    'time': mtime
+                })
+
+    # 2. Parse board tasks
+    board_tasks = company.get('board_tasks', [])
+    if not board_tasks:
+        board_tasks = db_get_tasks(cid)
+    for t in board_tasks:
+        title = (t.get('title', '') or '')[:30]
+        agent_id = t.get('agent_id', '')
+        agent_name = agent_id
+        for a in company.get('agents', []):
+            if a.get('id') == agent_id:
+                agent_name = a.get('name', agent_id)
+                break
+        status = t.get('status', '')
+        updated = t.get('updated_at', '') or ''
+        ttime = updated[11:16] if len(updated) > 15 else ''
+
+        if status == '진행중':
+            events.append({
+                'icon': '🔨', 'type': 'action',
+                'text': f"{agent_name}가 '{title}'에 착수했다",
+                'time': ttime
+            })
+        elif status == '완료' and updated.startswith(today_str):
+            events.append({
+                'icon': '✅', 'type': 'done',
+                'text': f"{agent_name}가 '{title}'을(를) 완료했다",
+                'time': ttime
+            })
+
+    # 3. Approvals
+    pending_approvals = [a for a in company.get('approvals', []) if a.get('status') == 'pending']
+    if not pending_approvals:
+        pending_approvals = db_get_approvals(cid, status='pending')
+    for a in pending_approvals:
+        title = a.get('detail', a.get('type', '기안'))[:40]
+        from_agent = a.get('from_agent', '에이전트')
+        events.append({
+            'icon': '⏳', 'type': 'approval',
+            'text': f"{from_agent}의 '{title}'이(가) 승인을 기다리고 있다",
+            'time': a.get('time', '')
+        })
+
+    all_approvals = company.get('approvals', [])
+    if not all_approvals:
+        all_approvals = db_get_approvals(cid)
+    for a in all_approvals:
+        if a.get('status') == 'approved':
+            title = a.get('detail', a.get('type', '기안'))[:40]
+            events.append({
+                'icon': '✅', 'type': 'milestone',
+                'text': f"마스터가 '{title}'을(를) 승인했다",
+                'time': a.get('time', '')
+            })
+
+    # 4. Activity log
+    activity = company.get('activity_log', [])
+    if not activity:
+        activity = db_get_activity(cid)
+    for entry in activity[-15:]:
+        text = entry.get('text', '')
+        etime = entry.get('time', '')
+        if '합류' in text:
+            events.append({'icon': '🆕', 'type': 'milestone', 'text': text, 'time': etime})
+        elif '퇴사' in text:
+            events.append({'icon': '👋', 'type': 'milestone', 'text': text, 'time': etime})
+        elif '정기 작업' in text:
+            events.append({'icon': '🔄', 'type': 'action', 'text': text, 'time': etime})
+
+    # 5. Budget warning
+    total_spent = sum(
+        a.get('cost', {}).get('total_cost', 0.0)
+        for a in company.get('agents', [])
+    )
+    budget = company.get('budget', DEFAULT_BUDGET)
+    if budget > 0 and total_spent > budget * 0.8:
+        pct = int(total_spent / budget * 100)
+        events.append({
+            'icon': '⚠️', 'type': 'warning',
+            'text': f"예산 초과 경고: 현재 ${total_spent:.2f} / ${budget:.2f} ({pct}% 사용)",
+            'time': datetime.now().strftime('%H:%M')
+        })
+
+    # 6. Working agents
+    for a in company.get('agents', []):
+        if a.get('status') == 'working':
+            events.append({
+                'icon': '💭', 'type': 'action',
+                'text': f"{a.get('name', '?')}가 현재 작업 중이다",
+                'time': datetime.now().strftime('%H:%M')
+            })
+
+    # Deduplicate by text prefix
+    seen_texts = set()
+    unique_events = []
+    for ev in reversed(events):
+        key = ev['text'][:30]
+        if key not in seen_texts:
+            seen_texts.add(key)
+            unique_events.append(ev)
+    unique_events.reverse()
+
+    result = unique_events[-15:]
+    _narrative_cache[cid] = (result, cache_now)
+    return result
+
+
 def read_agent_standup(cid, agent_id):
     """Read agent's standup from DB cache."""
     content = db_get_doc(cid, 'standup', agent_id)
@@ -1899,6 +2068,23 @@ def nudge_agent(cid, text, target):
         if memories:
             mem_text = '\n'.join(f"- [{m.get('mem_type','obs')}] {m['content']}" for m in memories)
             ctx_parts.append(f"=== Memory ===\n{mem_text}")
+        # Agent work priorities
+        try:
+            prio_matrix = db_get_priorities(cid)
+            agent_prios = prio_matrix.get(aid, {})
+            if agent_prios:
+                prio_lines = []
+                for cat in PRIORITY_CATEGORIES:
+                    p = agent_prios.get(cat, 3)
+                    if p == 0:
+                        prio_lines.append(f"{cat}: - (비활성)")
+                    else:
+                        stars = '★' * (6 - p)
+                        label = {1: '최우선', 2: '높음', 3: '보통', 4: '낮음', 5: '최저'}.get(p, '보통')
+                        prio_lines.append(f"{cat}: {stars} ({label})")
+                ctx_parts.append("=== 작업 우선순위 ===\n" + '\n'.join(prio_lines))
+        except Exception:
+            pass
         ctx = '\n\n'.join(ctx_parts)
         lang_name = LANG.get(company.get('lang','ko'), '한국어') if company else '한국어'
         is_leader = (aid == get_leader_id(company)) if company else (aid == 'ceo')
@@ -1931,25 +2117,60 @@ def nudge_agent(cid, text, target):
             )
         else:
             leader_name = get_leader_id(company).upper() if company else 'CEO'
-            instruction = (
-                f"\n\n[TASK] {msg}"
-                f"\n\n[OUTPUT FORMAT — REQUIRED]"
-                f"\nRespond in {lang_name} with:"
-                f"\n"
-                f"\n## Actions Taken"
-                f"\n(What you actually did)"
-                f"\n"
-                f"\n## Results"
-                f"\n(Concrete output)"
-                f"\n"
-                f"\n## Report"
-                f"\n@{leader_name} (summary of results)"
-                f"\n"
-                f"\n[RULES] 기한 없이 바로 처리. 결과를 즉시 보고하세요. NO_REPLY 금지."
-                f"\n\n[COMMANDS]"
-                f"\n- [TASK_DONE:작업명] — 작업 완료"
-                f"\n- [APPROVAL:category:title:detail] — 결재 요청"
-            )
+            # Check if this agent has child agents (team lead detection)
+            child_agents = [a for a in (company.get('agents', []) if company else [])
+                           if a.get('parent_agent') == aid]
+            if child_agents:
+                # Team lead: can delegate to children
+                child_list = '\n'.join(f"- @{a['id'].upper()} ({a.get('role','')}) — 직접 @멘션으로 지시하세요" for a in child_agents)
+                child_mentions = ' '.join(f'@{a["id"].upper()}' for a in child_agents)
+                instruction = (
+                    f"\n\n=== 당신의 팀원 ==="
+                    f"\n{child_list}"
+                    f"\n"
+                    f"\n당신은 팀 리더입니다. 작업을 팀원에게 위임하고 결과를 취합하세요."
+                    f"\n\n[TASK] {msg}"
+                    f"\n\n[OUTPUT FORMAT — REQUIRED]"
+                    f"\nRespond in {lang_name} with:"
+                    f"\n"
+                    f"\n## Actions Taken"
+                    f"\n(What you actually did or decided)"
+                    f"\n"
+                    f"\n## Delegations"
+                    f"\n(Use @mentions to delegate: {child_mentions} with specific tasks)"
+                    f"\n"
+                    f"\n## Results"
+                    f"\n(Concrete output)"
+                    f"\n"
+                    f"\n## Report"
+                    f"\n@{leader_name} (summary of results)"
+                    f"\n"
+                    f"\n[RULES] 기한 없이 바로 처리. 팀원에게 구체적으로 위임하세요. NO_REPLY 금지."
+                    f"\n\n[COMMANDS]"
+                    f"\n- [TASK_ADD:작업명:high] — 칸반에 작업 추가"
+                    f"\n- [TASK_DONE:작업명] — 작업 완료"
+                    f"\n- [APPROVAL:category:title:detail] — 결재 요청"
+                )
+            else:
+                instruction = (
+                    f"\n\n[TASK] {msg}"
+                    f"\n\n[OUTPUT FORMAT — REQUIRED]"
+                    f"\nRespond in {lang_name} with:"
+                    f"\n"
+                    f"\n## Actions Taken"
+                    f"\n(What you actually did)"
+                    f"\n"
+                    f"\n## Results"
+                    f"\n(Concrete output)"
+                    f"\n"
+                    f"\n## Report"
+                    f"\n@{leader_name} (summary of results)"
+                    f"\n"
+                    f"\n[RULES] 기한 없이 바로 처리. 결과를 즉시 보고하세요. NO_REPLY 금지."
+                    f"\n\n[COMMANDS]"
+                    f"\n- [TASK_DONE:작업명] — 작업 완료"
+                    f"\n- [APPROVAL:category:title:detail] — 결재 요청"
+                )
         prompt = f"{ctx}{instruction}" if ctx else instruction.strip()
 
         nudge_start = time.time()
@@ -2085,14 +2306,29 @@ def nudge_agent(cid, text, target):
                         )
                     else:
                         leader = get_leader_id(company).upper() if company else 'CEO'
-                        enforce_prompt = (
-                            f"⚠️ SYSTEM REJECTION: Your response had ZERO system commands.\n"
-                            f"You MUST report results using these formats:\n\n"
-                            f"To report: @{leader} (your results summary)\n"
-                            f"To complete task: [TASK_DONE:작업명]\n"
-                            f"To request approval: [APPROVAL:category:title:detail]\n\n"
-                            f"Re-do your response. Include @{leader} mention AND [TASK_DONE:...] command."
-                        )
+                        # Check if team lead with children — enforce delegation
+                        guardrail_children = [a for a in (company.get('agents', []) if company else [])
+                                             if a.get('parent_agent') == aid]
+                        if guardrail_children:
+                            child_list = ', '.join(f'@{a["id"].upper()}' for a in guardrail_children)
+                            enforce_prompt = (
+                                f"⚠️ SYSTEM REJECTION: Your response had ZERO system commands.\n"
+                                f"You are a TEAM LEAD. You MUST delegate to your team:\n\n"
+                                f"To delegate: {child_list} (describe specific task for each)\n"
+                                f"To report: @{leader} (summary of results)\n"
+                                f"To add task: [TASK_ADD:작업명:high]\n"
+                                f"To complete task: [TASK_DONE:작업명]\n\n"
+                                f"Re-do your response. Include @mentions to team members AND @{leader} report."
+                            )
+                        else:
+                            enforce_prompt = (
+                                f"⚠️ SYSTEM REJECTION: Your response had ZERO system commands.\n"
+                                f"You MUST report results using these formats:\n\n"
+                                f"To report: @{leader} (your results summary)\n"
+                                f"To complete task: [TASK_DONE:작업명]\n"
+                                f"To request approval: [APPROVAL:category:title:detail]\n\n"
+                                f"Re-do your response. Include @{leader} mention AND [TASK_DONE:...] command."
+                            )
                     try:
                         retry_raw = RUNTIME.run(agent_id, session_id, enforce_prompt, timeout=AGENT_RUN_TIMEOUT)
                         if retry_raw and len(retry_raw) > 80:
@@ -2164,7 +2400,13 @@ def nudge_agent(cid, text, target):
                     is_escalation_response = '마스터의 결재 응답' in text or '에스컬레이션' in text
                     # Strip emoji from mentions before checking (agents may include emoji like @📈CMO)
                     clean_for_mention = re.sub(r'@[^\w\s]*(\w+)', r'@\1', clean)
-                    has_agent_mention = bool(re.search(r'@(CMO|CTO|CFO|COO|HR|Designer|Sales|Legal|Support)', clean_for_mention, re.IGNORECASE))
+                    # Dynamic mention detection: check against actual agent IDs (not just hardcoded roles)
+                    existing_ids = {a['id'].lower() for a in company.get('agents', [])} if company else set()
+                    mentioned_ids = {m.lower() for m in re.findall(r'@([A-Za-z0-9_-]+)', clean_for_mention)}
+                    has_agent_mention = bool(mentioned_ids & (existing_ids - {aid}))
+                    if not has_agent_mention:
+                        # Fallback: legacy hardcoded check
+                        has_agent_mention = bool(re.search(r'@(CMO|CTO|CFO|COO|HR|Designer|Sales|Legal|Support)', clean_for_mention, re.IGNORECASE))
                     if has_agent_mention:
                         mentions = ','.join(re.findall(r'@(\w+)', clean_for_mention, re.IGNORECASE))
                         chain = f"{aid}->{mentions}"
@@ -2172,6 +2414,52 @@ def nudge_agent(cid, text, target):
                         if mention_count > _MENTION_LIMIT:
                             print(f"[nudge] mention rate limit hit: {chain} ({mention_count})")
                             has_agent_mention = False
+
+                    # ─── Manager Delegation Chain ───
+                    # Auto-delegation: if a team lead responds WITHOUT @mentioning children,
+                    # but has child agents and the task is delegatable, auto-nudge children.
+                    if not is_escalation_response and company:
+                        child_agents = [a for a in company.get('agents', [])
+                                       if a.get('parent_agent') == aid]
+                        if child_agents and not has_agent_mention:
+                            # Team lead responded without delegating — auto-nudge children
+                            # Extract task context from the original message and response
+                            delegation_context = f"[팀장 {agent_name} 지시] {text[:200]}"
+                            if clean:
+                                delegation_context += f"\n[팀장 분석] {clean[:300]}"
+                            print(f"[auto-delegation] {aid} has {len(child_agents)} children, no mentions — auto-delegating")
+                            append_chat(cid, {"from": "시스템", "emoji": "🔗",
+                                "text": f"🔗 {agent_name}의 작업을 팀원에게 자동 위임합니다",
+                                "time": datetime.now().strftime('%H:%M'), "type": "system"}, broadcast=True)
+                            for child in child_agents[:4]:  # max 4 children to prevent overload
+                                child_id = child['id'].upper()
+                                child_task = f"{delegation_context}\n\n당신의 역할({child.get('role','')})에 맞는 부분을 처리하세요."
+                                add_to_inbox(cid, child['id'], agent_name, child_task, company.get('lang','ko'))
+                                task_title = extract_task_from_instruction(text) or text[:30]
+                                add_board_task(cid, task_title, child['id'], '대기', [], '')
+                                print(f"[auto-delegation] {aid} → {child['id']}: {child_task[:60]}")
+                                threading.Thread(target=nudge_agent, args=(cid, child_task, child_id), daemon=True).start()
+                            # Refresh board after auto-delegation
+                            refreshed = get_company(cid)
+                            if refreshed:
+                                update_company(cid, {'board_tasks': refreshed.get('board_tasks', [])})
+
+                        elif child_agents and has_agent_mention:
+                            # Cascade nudge: team lead DID @mention children —
+                            # enrich the forwarded context with WHY (original task from parent)
+                            # Check delegation depth to prevent infinite loops (max 2 levels)
+                            delegation_depth = int(re.search(r'\[delegation_depth:(\d+)\]', text).group(1)) if re.search(r'\[delegation_depth:(\d+)\]', text) else 0
+                            if delegation_depth < 2:
+                                # Add cascade context marker to forwarded messages
+                                # The _handle_agent_msg will pick up @mentions and forward them;
+                                # we inject parent context into the clean text so children see it
+                                parent_context = f"\n\n[배경] 상위 지시: {text[:150]}"
+                                depth_marker = f"\n[delegation_depth:{delegation_depth + 1}]"
+                                # Modify clean to include context before it's posted via agent-msg
+                                clean = clean + parent_context + depth_marker
+                                print(f"[cascade] {aid} delegating with context (depth={delegation_depth})")
+                            else:
+                                print(f"[cascade] {aid} max delegation depth reached ({delegation_depth}), no further cascade")
 
         except subprocess.TimeoutExpired:
             print(f"[nudge] {agent_id} timeout after {time.time()-nudge_start:.0f}s")
@@ -3428,6 +3716,10 @@ def api_get_company(cid: str):
 def api_get_newspaper(cid: str):
     return {"newspaper": generate_newspaper(cid)}
 
+@app.get("/api/narrative/{cid}")
+def api_get_narrative(cid: str):
+    return {"events": generate_narrative(cid)}
+
 @app.get("/api/inbox/{cid}/{agent_id}")
 def api_get_inbox(cid: str, agent_id: str):
     return {"inbox": read_agent_inbox(cid, agent_id)}
@@ -4216,6 +4508,28 @@ async def api_update_contact(cid: str, contact_id: str, request: Request):
 def api_delete_contact(cid: str, contact_id: str):
     db_delete_contact(cid, contact_id)
     return {"ok": True}
+
+# ─── Agent Priorities API ──────────────────────────────────────────────────
+
+@app.get("/api/priorities/{cid}")
+def api_get_priorities(cid: str):
+    c = get_company(cid)
+    if c:
+        agent_ids = [a['id'] for a in c.get('agents', [])]
+        db_init_default_priorities(cid, agent_ids)
+    matrix = db_get_priorities(cid)
+    return {"categories": PRIORITY_CATEGORIES, "matrix": matrix}
+
+@app.post("/api/priority-set/{cid}")
+async def api_set_priority(cid: str, request: Request):
+    body = await request.json()
+    agent_id = body.get('agent_id', '')
+    category = body.get('category', '')
+    priority = body.get('priority', 3)
+    if not agent_id or category not in PRIORITY_CATEGORIES:
+        return {"ok": False, "error": "invalid agent_id or category"}
+    result = db_set_priority(cid, agent_id, category, priority)
+    return {"ok": True, "result": result}
 
 # ─── Model Management API ──────────────────────────────────────────────────
 

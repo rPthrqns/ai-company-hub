@@ -315,6 +315,13 @@ _COMPANY_SCHEMA = """
         updated_at TEXT DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_crm_company ON crm_contacts(company_id);
+    CREATE TABLE IF NOT EXISTS agent_priorities (
+        company_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        priority INTEGER DEFAULT 3,
+        PRIMARY KEY (company_id, agent_id, category)
+    );
 """
 
 def _ensure_company_db(cid: str):
@@ -1526,6 +1533,50 @@ def db_delete_contact(cid, contact_id):
     with _get_lock(cid):
         conn = _conn(cid)
         conn.execute("DELETE FROM crm_contacts WHERE id=? AND company_id=?", (contact_id, cid))
+        conn.commit(); conn.close()
+
+# ─── Agent Priorities ───
+
+PRIORITY_CATEGORIES = ['마케팅', '개발', '디자인', '분석', '보고', '기획']
+
+def db_get_priorities(cid):
+    """Return priority matrix as {agent_id: {category: priority}}."""
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        rows = conn.execute("SELECT agent_id, category, priority FROM agent_priorities WHERE company_id=?", (cid,)).fetchall()
+        conn.close()
+    result = {}
+    for r in rows:
+        d = dict(r)
+        aid = d['agent_id']
+        if aid not in result:
+            result[aid] = {}
+        result[aid][d['category']] = d['priority']
+    return result
+
+def db_set_priority(cid, agent_id, category, priority):
+    """Set a single priority cell. priority=3 is default, 0=disabled."""
+    priority = max(0, min(5, int(priority)))
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute(
+            "INSERT OR REPLACE INTO agent_priorities (company_id, agent_id, category, priority) VALUES (?,?,?,?)",
+            (cid, agent_id, category, priority))
+        conn.commit(); conn.close()
+    return {'agent_id': agent_id, 'category': category, 'priority': priority}
+
+def db_init_default_priorities(cid, agent_ids):
+    """Initialize default priorities (3) for all agents × categories if not already set."""
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        for aid in agent_ids:
+            for cat in PRIORITY_CATEGORIES:
+                conn.execute(
+                    "INSERT OR IGNORE INTO agent_priorities (company_id, agent_id, category, priority) VALUES (?,?,?,3)",
+                    (cid, aid, cat))
         conn.commit(); conn.close()
 
 # ─── Migration ───
