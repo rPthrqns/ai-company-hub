@@ -1796,18 +1796,20 @@ def nudge_agent(cid, text, target):
                 f"\n\n[마스터 지시] {msg}"
                 f"\n\n[CEO 행동 규칙]"
                 f"\n1. {lang_name}로 구체적인 계획/결과를 즉시 응답하세요."
-                f"\n2. '파악하겠습니다', '확인하겠습니다' 같은 준비 발언 금지. 바로 실행하세요."
-                f"\n3. 팀원에게 지시: @CMO 구체적지시 @CTO 구체적지시 형식."
-                f"\n4. 계획: 1. 2. 3. 번호 목록으로 나열."
-                f"\n5. NO_REPLY 절대 금지."
+                f"\n2. 준비 발언('파악하겠습니다','확인하겠습니다') 금지. 바로 실행."
+                f"\n3. 팀원 지시: @CMO 구체적지시 @CTO 구체적지시."
+                f"\n4. 계획: 1. 2. 3. 번호 목록."
+                f"\n5. 기한 없음. 최대한 빠르게 즉시 완료."
+                f"\n6. NO_REPLY 금지."
             )
         else:
             instruction = (
                 f"\n\n[지시] {msg}"
                 f"\n\n[행동 규칙]"
-                f"\n1. {lang_name}로 구체적인 결과를 즉시 응답하세요."
+                f"\n1. {lang_name}로 구체적인 결과를 즉시 응답."
                 f"\n2. 완료 후 @CEO에게 보고."
-                f"\n3. NO_REPLY 절대 금지."
+                f"\n3. 기한 없음. 최대한 빠르게 즉시 완료."
+                f"\n4. NO_REPLY 금지."
             )
         prompt = f"{ctx}{instruction}" if ctx else instruction.strip()
 
