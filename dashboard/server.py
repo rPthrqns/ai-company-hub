@@ -4303,7 +4303,12 @@ async def api_i18n_patch(request: Request):
 
 # ── Static files (must be last — catches everything else) ──────────────────
 
-app.mount("/", StaticFiles(directory=str(BASE / "dashboard"), html=True), name="static")
+# Serve index.html directly for fast page load
+@app.get("/")
+def serve_index():
+    return FileResponse(str(BASE / "dashboard" / "index.html"), media_type="text/html")
+
+app.mount("/", StaticFiles(directory=str(BASE / "dashboard")), name="static")
 
 # ─── Server Setup ───
 
