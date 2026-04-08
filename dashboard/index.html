@@ -50,11 +50,22 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .appr-card .appr-btns button{border:none;border-radius:4px;padding:3px 10px;font-size:9px;cursor:pointer}
 /* Chat */
 .messages{flex:1;overflow-y:auto;padding:8px}
-.msg{display:flex;gap:6px;padding:4px 0;animation:fadeIn .2s}
-.msg .av{width:28px;height:28px;border-radius:50%;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
-.msg .name{font-size:10px;font-weight:600;color:#60a5fa;margin-bottom:1px}
-.msg .text{font-size:11px;line-height:1.5;word-break:break-word}
+.msg{display:flex;gap:8px;padding:6px 0;animation:fadeIn .2s}
+.msg .av{width:30px;height:30px;border-radius:50%;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;border:1px solid #334155}
+.msg .name{font-size:10px;font-weight:700;color:#60a5fa;margin-bottom:2px}
+.msg.user .name{color:#a78bfa}
+.msg .bubble{background:var(--card);border-radius:8px;padding:6px 10px;font-size:11px;line-height:1.6;word-break:break-word;max-width:100%;border:1px solid #1e293b}
+.msg.user .bubble{background:#1e1b4b;border-color:#312e81}
+.msg .bubble .at{color:#a78bfa;font-weight:600;background:rgba(167,139,250,.1);padding:1px 4px;border-radius:3px}
+.msg .bubble .at-arrow{color:var(--accent);font-weight:700;margin:0 2px}
 .msg.sys{justify-content:center;padding:6px;font-size:10px;color:var(--dim)}
+.msg .bubble strong{color:#f1f5f9}
+.msg .bubble code{background:#0f172a;padding:1px 4px;border-radius:3px;font-size:10px;color:#60a5fa}
+.mention-card{background:linear-gradient(135deg,#1e1b4b,#312e81);border:1px solid #4338ca;border-radius:8px;padding:6px 10px;margin:4px 0;font-size:10px}
+.mention-card .mc-from{color:#a78bfa;font-weight:700;font-size:10px}
+.mention-card .mc-arrow{color:var(--accent);margin:0 4px}
+.mention-card .mc-to{color:#60a5fa;font-weight:700}
+.mention-card .mc-body{color:var(--text);margin-top:3px;line-height:1.4}
 .input-area{display:flex;gap:6px;padding:8px;border-top:1px solid var(--border)}
 .input-area input{flex:1;background:var(--card);border:1px solid #374151;border-radius:8px;padding:8px 12px;color:var(--text);font-size:12px;outline:none}
 .input-area input:focus{border-color:var(--accent)}
@@ -342,10 +353,62 @@ function renderSwim(){
 }
 
 // ─── Chat ───
+function fmtText(text){
+  let h=_e(text);
+  // Tables: detect |...|...| patterns
+  const lines=h.split('\n');
+  let inTable=false,tableHtml='';
+  const out=[];
+  lines.forEach(l=>{
+    if(l.trim().startsWith('|')&&l.trim().endsWith('|')){
+      if(!inTable){inTable=true;tableHtml='<table style="border-collapse:collapse;width:100%;margin:4px 0;font-size:10px">';}
+      const cells=l.split('|').filter(c=>c.trim());
+      if(cells.every(c=>/^[-:]+$/.test(c.trim()))){return;} // separator row
+      const tag=tableHtml.includes('<tr>')?'td':'th';
+      tableHtml+=`<tr>${cells.map(c=>`<${tag} style="border:1px solid #334155;padding:3px 6px;${tag==='th'?'background:#1e293b;color:#93c5fd;font-weight:600':''}">${c.trim()}</${tag}>`).join('')}</tr>`;
+    }else{
+      if(inTable){tableHtml+='</table>';out.push(tableHtml);inTable=false;tableHtml='';}
+      out.push(l);
+    }
+  });
+  if(inTable){tableHtml+='</table>';out.push(tableHtml);}
+  h=out.join('\n');
+  // Markdown
+  h=h.replace(/^### (.+)$/gm,'<div style="font-size:12px;font-weight:700;color:#f1f5f9;margin:6px 0 2px">$1</div>');
+  h=h.replace(/^## (.+)$/gm,'<div style="font-size:13px;font-weight:700;color:#f1f5f9;margin:8px 0 3px">$1</div>');
+  h=h.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  h=h.replace(/`([^`]+)`/g,'<code>$1</code>');
+  h=h.replace(/@(\w+)/g,'<span class="at">@$1</span>');
+  h=h.replace(/^- (.+)$/gm,'<div style="padding-left:10px">• $1</div>');
+  h=h.replace(/^\d+\. (.+)$/gm,'<div style="padding-left:10px">$&</div>');
+  h=h.replace(/\n/g,'<br>');
+  return h;
+}
 function addMsg(m){
   const el=$('msgs');if(!el)return;
   if(m.type==='system'){el.innerHTML+=`<div class="msg sys">${_e(m.text||'')}</div>`;el.scrollTop=el.scrollHeight;return}
-  el.innerHTML+=`<div class="msg"><div class="av">${m.type==='user'?'👤':(m.emoji||'👔')}</div><div><div class="name">${_e(m.from)}</div><div class="text">${_e(m.text||'')}</div></div></div>`;
+  const isUser=m.type==='user';
+  const avatar=isUser?'👤':(m.emoji||'👔');
+  const text=m.text||'';
+  // Detect mention pattern: @Agent instruction
+  const mentions=text.match(/@(\w+)/g);
+  const hasMention=mentions&&!isUser;
+  let body='';
+  if(hasMention){
+    // Split into mention cards and normal text
+    const lines=text.split('\n');
+    const mentionLines=[],normalLines=[];
+    lines.forEach(l=>{if(l.trim().startsWith('@')&&/@\w+/.test(l))mentionLines.push(l);else normalLines.push(l)});
+    if(normalLines.join('').trim())body+=`<div class="bubble">${fmtText(normalLines.join('\n'))}</div>`;
+    mentionLines.forEach(ml=>{
+      const targets=(ml.match(/@(\w+)/g)||[]).map(t=>t.slice(1));
+      const content=ml.replace(/@\w+\s*/g,'').trim();
+      body+=`<div class="mention-card"><span class="mc-from">${_e(m.from)}</span><span class="mc-arrow">→</span>${targets.map(t=>`<span class="mc-to">@${_e(t)}</span>`).join(' ')}<div class="mc-body">${fmtText(content)}</div></div>`;
+    });
+  }else{
+    body=`<div class="bubble">${fmtText(text)}</div>`;
+  }
+  el.innerHTML+=`<div class="msg${isUser?' user':''}"><div class="av">${avatar}</div><div style="flex:1;min-width:0"><div class="name">${_e(m.from)}</div>${body}</div></div>`;
   el.scrollTop=el.scrollHeight;
 }
 function ins(n){const i=$('chat-in');i.value+='@'+n+' ';i.focus()}
