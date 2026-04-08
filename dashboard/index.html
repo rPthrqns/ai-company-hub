@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Company Hub</title>
-<script src="https://d3js.org/d3.v7.min.js"></script>
+<!-- D3.js removed — org chart uses HTML cards now -->
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#0a0a1a;--panel:#111827;--card:#1e293b;--border:#1e3a5f;--text:#e0e0e0;--dim:#64748b;--accent:#3b82f6;--accent2:#8b5cf6;--green:#00ff88;--yellow:#fbbf24;--red:#ef4444}
@@ -788,18 +788,22 @@ async function _loadI18n(lang){
     if(!langRes.ok)return;
     const strings=await langRes.json();
     const enStrings=enRes.ok?await enRes.json():{};
-    // Fill missing keys with English fallback
+    // Fill missing keys with English fallback (skip meta keys)
     const missingKeys=[];
     for(const k of Object.keys(enStrings)){
       if(k.startsWith('_'))continue;
-      if(!strings[k]){strings[k]=enStrings[k];missingKeys.push(k);}
+      if(!strings[k]||strings[k]===enStrings[k]){
+        if(!strings[k])strings[k]=enStrings[k]; // fallback
+        // Only mark as missing if it's actually untranslated AND not English
+        if(lang!=='en'&&!strings[k])missingKeys.push(k);
+      }
     }
     if(!UI[lang])UI[lang]={};
     Object.assign(UI[lang],strings);
     currentLang=lang;
     applyLang();
     // Auto-translate missing keys in background
-    if(missingKeys.length>0&&lang!=='en'){
+    if(missingKeys.length>=3&&lang!=='en'){  // Only patch if 3+ keys missing (avoid LLM call for 1-2 keys)
       console.log(`[i18n] ${missingKeys.length} new keys, translating...`);
       const missing={};missingKeys.forEach(k=>missing[k]=enStrings[k]);
       fetch('/api/i18n/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang,missing})}).then(r=>r.json()).then(d=>{
