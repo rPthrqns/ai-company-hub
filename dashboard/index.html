@@ -345,11 +345,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   <!-- Main: Tabbed panel (조직도 + 대기열·결재·연혁·정기·결과물·리포트) -->
   <div class="panel" style="padding:0;overflow:hidden">
     <div class="center-tabs">
-      <button class="center-tab active" onclick="switchCenterTab('orgchart')" title="에이전트 조직도, 상태, 관리">🏢 조직</button>
-      <button class="center-tab" onclick="switchCenterTab('work')" title="칸반 대기열 + 목표 + 스프린트">📋 작업</button>
-      <button class="center-tab" onclick="switchCenterTab('manage')" title="결재 + 리스크 + 마일스톤 + 계획">🔔 관리</button>
-      <button class="center-tab" onclick="switchCenterTab('analytics')" title="KPI 대시보드 + 리포트 + 성과평가">📈 분석</button>
-      <button class="center-tab" onclick="switchCenterTab('docs')" title="지식 베이스 위키 + 결과물 + 정기작업">📖 자료</button>
+      <button class="center-tab active" onclick="switchCenterTab('orgchart')">⚡ 타임라인</button>
+      <button class="center-tab" onclick="switchCenterTab('manage')">📋 관리</button>
+      <button class="center-tab" onclick="switchCenterTab('docs')">📂 자료</button>
     </div>
     <div class="center-panel-content">
       <!-- ① 타임라인 수영장 -->
