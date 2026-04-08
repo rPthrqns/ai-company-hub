@@ -33,7 +33,8 @@ from db import (init_db, migrate_from_json, db_get_company, db_save_company, db_
                db_get_budgets, db_set_budget,
                db_get_votes, db_add_vote, db_cast_vote,
                db_add_audit, db_get_audit,
-               db_get_contacts, db_add_contact, db_delete_contact)
+               db_get_contacts, db_add_contact, db_delete_contact,
+               db_add_memory, db_get_memories)
 
 # ─── Configuration (env overridable) ───
 PORT = int(os.environ.get('PORT', 3000))
@@ -1891,32 +1892,53 @@ def nudge_agent(cid, text, target):
             ctx_parts.append("=== 정기 작업 ===\n" + '\n'.join(
                 f"- [{t.get('agent_id','')}] {t.get('title','')} ({t.get('interval','')}분마다)"
                 for t in recurring[:5]))
+        # Memory stream (Stanford GenAgents pattern)
+        memories = db_get_memories(cid, aid, limit=5)
+        if memories:
+            mem_text = '\n'.join(f"- [{m.get('mem_type','obs')}] {m['content']}" for m in memories)
+            ctx_parts.append(f"=== Memory ===\n{mem_text}")
         ctx = '\n\n'.join(ctx_parts)
         lang_name = LANG.get(company.get('lang','ko'), '한국어') if company else '한국어'
         is_leader = (aid == get_leader_id(company)) if company else (aid == 'ceo')
         if is_leader:
             other_agents = [a['id'].upper() for a in (company.get('agents',[]) if company else []) if a['id'] != aid][:4]
-            mention_list = ' '.join(f'@{a}' for a in other_agents) if other_agents else '@팀원'
+            mention_list = ' '.join(f'@{a}' for a in other_agents) if other_agents else '@team'
             instruction = (
-                f"\n\n[INSTRUCTION] {msg}"
-                f"\n\n[RULES — STRICTLY FOLLOW]"
-                f"\n- Respond in {lang_name}. Be concrete and actionable."
-                f"\n- NO prep talk ('I will check', 'Let me analyze'). Execute immediately."
-                f"\n- NO deadlines/timelines. Everything is ASAP."
-                f"\n- Delegate to team: {mention_list} with specific tasks."
-                f"\n- Use numbered list for plans."
-                f"\n- Need master's decision? Use [APPROVAL:category:title:detail]"
-                f"\n- NO_REPLY forbidden."
+                f"\n\n[TASK] {msg}"
+                f"\n\n[OUTPUT FORMAT — YOU MUST FOLLOW THIS STRUCTURE]"
+                f"\nRespond in {lang_name} with ALL of these sections:"
+                f"\n"
+                f"\n## Actions Taken"
+                f"\n(What you actually did — files created, analysis done, decisions made)"
+                f"\n"
+                f"\n## Delegations"
+                f"\n(Use @mentions: {mention_list} with specific tasks)"
+                f"\n"
+                f"\n## Results"
+                f"\n(Concrete deliverables, numbered list)"
+                f"\n"
+                f"\n## Next Steps"
+                f"\n(What happens next, or [APPROVAL:...] if master decision needed)"
+                f"\n"
+                f"\n[RULES] NO prep talk. NO 'I will check'. Act NOW. NO_REPLY forbidden."
             )
         else:
+            leader_name = get_leader_id(company).upper() if company else 'CEO'
             instruction = (
-                f"\n\n[INSTRUCTION] {msg}"
-                f"\n\n[RULES]"
-                f"\n- Respond in {lang_name}. Deliver results immediately."
-                f"\n- NO prep talk. Execute and report."
-                f"\n- Report results to @{get_leader_id(company).upper() if company else 'CEO'}."
-                f"\n- Need approval? Use [APPROVAL:category:title:detail]"
-                f"\n- NO_REPLY forbidden."
+                f"\n\n[TASK] {msg}"
+                f"\n\n[OUTPUT FORMAT — REQUIRED]"
+                f"\nRespond in {lang_name} with:"
+                f"\n"
+                f"\n## Actions Taken"
+                f"\n(What you actually did)"
+                f"\n"
+                f"\n## Results"
+                f"\n(Concrete output)"
+                f"\n"
+                f"\n## Report"
+                f"\n@{leader_name} (summary of results)"
+                f"\n"
+                f"\n[RULES] NO prep talk. Execute NOW. NO_REPLY forbidden."
             )
         prompt = f"{ctx}{instruction}" if ctx else instruction.strip()
 
@@ -1944,7 +1966,7 @@ def nudge_agent(cid, text, target):
 
             print(f"[nudge] calling RUNTIME.run for {agent_id} session={session_id} prompt_len={len(prompt)}")
             try:
-                reply_raw = RUNTIME.run(agent_id, session_id, prompt, timeout=90)
+                reply_raw = RUNTIME.run(agent_id, session_id, prompt, timeout=AGENT_RUN_TIMEOUT)
             except subprocess.TimeoutExpired:
                 print(f"[nudge] {agent_id} main timeout")
                 reply_raw = ''
@@ -1963,7 +1985,7 @@ def nudge_agent(cid, text, target):
                 time.sleep(2)
                 new_session = f"{agent_id}-fresh-{int(time.time())}"
                 try:
-                    reply_raw = RUNTIME.run(agent_id, new_session, prompt, timeout=60)
+                    reply_raw = RUNTIME.run(agent_id, new_session, prompt, timeout=AGENT_RETRY_TIMEOUT)
                 except subprocess.TimeoutExpired:
                     reply_raw = ''
                 print(f"[nudge] {agent_id} retry reply={len(reply_raw)}chars")
@@ -2009,15 +2031,33 @@ def nudge_agent(cid, text, target):
                 reply_raw = ''
 
             if reply_raw and 'No reply from agent' not in reply_raw:
-                _ESCALATION_COUNTS.pop(f"{cid}:{aid}", None)  # Reset on success
+                _ESCALATION_COUNTS.pop(f"{cid}:{aid}", None)
                 lines = reply_raw.split('\n')
                 clean = '\n'.join(l for l in lines
                                   if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
-                # Skip useless prep responses
-                prep_patterns = ['파악하겠', '확인하겠', '상황을 파악', '상황부터', 'check', 'assess', 'analyze first', 'let me']
-                if clean and len(clean) < 50 and any(p in clean.lower() for p in prep_patterns):
-                    print(f"[nudge] {agent_id} prep response skipped: {clean[:40]}")
-                    clean = ''
+                # Guardrail: require substance + structure
+                prep_patterns = ['파악하겠', '확인하겠', '상황을 파악', '상황부터', '먼저 현재', 'check', 'assess', 'analyze first', 'let me']
+                is_prep = len(clean) < 100 and any(p in clean.lower() for p in prep_patterns)
+                # Leader must delegate or show results
+                is_leader_response = is_leader and clean
+                needs_delegation = is_leader_response and not re.search(r'@[A-Za-z]', clean) and '## Delegations' not in clean and '## Results' not in clean and len(clean) < 200
+                if clean and (is_prep or needs_delegation):
+                    print(f"[guardrail] {agent_id} prep response rejected ({len(clean)}ch), retrying with enforcement...")
+                    enforce_prompt = f"Your previous response was rejected: '{clean[:60]}'. This is NOT acceptable. You MUST follow the OUTPUT FORMAT and provide ## Actions Taken and ## Results sections with REAL content. Do it NOW."
+                    try:
+                        retry_raw = RUNTIME.run(agent_id, session_id, enforce_prompt, timeout=AGENT_RUN_TIMEOUT)
+                        if retry_raw and len(retry_raw) > 80:
+                            lines = retry_raw.split('\n')
+                            clean = '\n'.join(l for l in lines if not l.startswith('[') and not l.startswith('(agent') and l.strip()).strip()
+                            print(f"[guardrail] {agent_id} enforced reply={len(clean)}chars")
+                        else:
+                            clean = ''
+                    except Exception:
+                        clean = ''
+                # Save to memory stream
+                if clean and len(clean) > 20:
+                    importance = min(10, max(3, len(clean) // 50))
+                    db_add_memory(cid, aid, clean[:300], importance=importance, mem_type='action')
                 if clean:
                     save_agent_memory(cid, aid, clean)
                     process_task_commands(cid, clean, aid)

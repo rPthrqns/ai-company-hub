@@ -289,6 +289,16 @@ _COMPANY_SCHEMA = """
         created_at TEXT DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_audit_company ON audit_log(company_id);
+    CREATE TABLE IF NOT EXISTS memory_stream (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id TEXT NOT NULL,
+        agent_id TEXT DEFAULT '',
+        content TEXT DEFAULT '',
+        importance INTEGER DEFAULT 5,
+        mem_type TEXT DEFAULT 'observation',
+        created_at TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_mem_agent ON memory_stream(company_id, agent_id);
     CREATE TABLE IF NOT EXISTS crm_contacts (
         id TEXT PRIMARY KEY,
         company_id TEXT NOT NULL,
@@ -1431,6 +1441,32 @@ def db_get_audit(cid, limit=100):
         _ensure_company_db(cid)
         conn = _conn(cid)
         rows = conn.execute("SELECT * FROM audit_log WHERE company_id=? ORDER BY id DESC LIMIT ?", (cid, limit)).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]
+
+# ─── Memory Stream (Stanford GenAgents style) ───
+
+def db_add_memory(cid, agent_id, content, importance=5, mem_type='observation'):
+    now = datetime.utcnow().isoformat()
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        conn.execute("INSERT INTO memory_stream (company_id,agent_id,content,importance,mem_type,created_at) VALUES (?,?,?,?,?,?)",
+            (cid, agent_id, content[:500], importance, mem_type, now))
+        # Keep max 100 memories per agent
+        conn.execute("DELETE FROM memory_stream WHERE company_id=? AND agent_id=? AND id NOT IN (SELECT id FROM memory_stream WHERE company_id=? AND agent_id=? ORDER BY id DESC LIMIT 100)", (cid, agent_id, cid, agent_id))
+        conn.commit(); conn.close()
+
+def db_get_memories(cid, agent_id, limit=10):
+    """Get recent memories weighted by recency and importance."""
+    with _get_lock(cid):
+        _ensure_company_db(cid)
+        conn = _conn(cid)
+        # Score = importance * recency (newer = higher)
+        rows = conn.execute(
+            "SELECT content, importance, mem_type, created_at FROM memory_stream "
+            "WHERE company_id=? AND agent_id=? ORDER BY importance DESC, id DESC LIMIT ?",
+            (cid, agent_id, limit)).fetchall()
         conn.close()
     return [dict(r) for r in rows]
 
