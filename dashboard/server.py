@@ -1202,7 +1202,9 @@ def setup_agent_workspace(agent_workspace, name, role, company_name, emoji, lang
             f"- Delegate to team via @mentions: @AgentName specific_task\n"
             f"- Report to master via @Master when done\n"
             f"- Need approval? Use [APPROVAL:category:title:detail]\n"
-            f"- NO prep talk. NO deadlines. Everything ASAP.\n"
+            f"- NO prep talk. Everything ASAP.\n"
+            f"- NEVER set deadlines, timelines, or schedules (no '1 week', 'D-7', '3 days').\n"
+            f"  You are AI — execute immediately, not later.\n"
             f"- NO_REPLY is forbidden.\n\n"
             f"## Context Sources\n"
             f"- Read _shared/newspaper.md for team status\n"
@@ -1920,7 +1922,7 @@ def nudge_agent(cid, text, target):
                 f"\n## Next Steps"
                 f"\n(What happens next, or [APPROVAL:...] if master decision needed)"
                 f"\n"
-                f"\n[RULES] NO prep talk. NO 'I will check'. Act NOW. NO_REPLY forbidden."
+                f"\n[RULES] NO prep talk. NO deadlines/timelines/schedules. Act NOW. NO_REPLY forbidden."
             )
         else:
             leader_name = get_leader_id(company).upper() if company else 'CEO'
@@ -1938,7 +1940,7 @@ def nudge_agent(cid, text, target):
                 f"\n## Report"
                 f"\n@{leader_name} (summary of results)"
                 f"\n"
-                f"\n[RULES] NO prep talk. Execute NOW. NO_REPLY forbidden."
+                f"\n[RULES] NO prep talk. NO deadlines. Execute NOW. NO_REPLY forbidden."
             )
         prompt = f"{ctx}{instruction}" if ctx else instruction.strip()
 
