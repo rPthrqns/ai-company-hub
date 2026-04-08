@@ -4361,14 +4361,13 @@ def api_download_all(cid: str):
         headers={'Content-Disposition': f'attachment; filename="{cid}_workspace.zip"'}
     )
 
-# ── Static files (must be last — catches everything else) ──────────────────
+# ── Static files ──────────────────
 
-# Serve index.html directly for fast page load
 @app.get("/")
 def serve_index():
-    return FileResponse(str(BASE / "dashboard" / "index.html"), media_type="text/html")
+    return FileResponse(str(BASE / "dashboard" / "index.html"), media_type="text/html", headers={"Cache-Control":"no-cache,no-store,must-revalidate","Pragma":"no-cache","Expires":"0"})
 
-app.mount("/", StaticFiles(directory=str(BASE / "dashboard")), name="static")
+app.mount("/", StaticFiles(directory=str(BASE / "dashboard"), html=True), name="static")
 
 # ─── Server Setup ───
 
