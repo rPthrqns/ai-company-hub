@@ -514,6 +514,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
     <select id="a-parent" style="background:var(--card);border:1px solid #374151;border-radius:8px;padding:8px 12px;color:var(--text);font-size:12px;outline:none">
       <option value="">CEO 직속 (기본)</option>
     </select>
+    <label>AI 모델 <span style="font-size:10px;color:var(--dim)">(openclaw 설정에서 로드)</span></label>
+    <select id="a-model" style="background:var(--card);border:1px solid #374151;border-radius:8px;padding:8px 12px;color:var(--text);font-size:12px;outline:none">
+      <option value="">기본 모델</option>
+    </select>
     <label>커스텀 프롬프트 <span style="font-size:10px;color:var(--dim)">(선택)</span></label>
     <textarea id="a-prompt" style="width:100%;background:var(--card);border:1px solid #374151;border-radius:8px;padding:9px 12px;color:var(--text);font-size:12px;outline:none;resize:vertical;min-height:60px" placeholder="에이전트의 성격과 역할을 설명하세요..."></textarea>
     <div class="modal-actions">
@@ -1398,11 +1402,23 @@ function _fillPreset(name,role,emoji){
   document.getElementById('a-emoji').value=emoji;
   document.querySelectorAll('.emoji-opt').forEach(el=>el.classList.remove('selected'));
 }
-function openAgentModal(){
+async function openAgentModal(){
   const sel=document.getElementById('a-parent');
   const c=companies.find(x=>x.id===currentCompany);
   sel.innerHTML='<option value="">CEO 직속 (기본)</option>';
   if(c)(c.agents||[]).forEach(a=>{sel.innerHTML+=`<option value="${a.id}">${_esc(a.emoji)} ${_esc(a.name)} 소속</option>`;});
+  // Load models from openclaw config
+  const modelSel=document.getElementById('a-model');
+  modelSel.innerHTML='<option value="">기본 모델</option>';
+  try{
+    const res=await fetch('/api/models');
+    const data=await res.json();
+    (data.models||[]).forEach(m=>{
+      const cost=m.cost_input?` ($${m.cost_input})`:''
+      const def=m.id===data.default?' ⭐':'';
+      modelSel.innerHTML+=`<option value="${m.id}">${_esc(m.name)} (${m.provider})${cost}${def}</option>`;
+    });
+  }catch(e){}
   document.getElementById('agent-modal').classList.add('show');
 }
 function closeAgentModal(){document.getElementById('agent-modal').classList.remove('show')}
@@ -1439,8 +1455,9 @@ async function addAgent(){
   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),30000);
   try{
   const parentAgent=document.getElementById('a-parent').value||'';
+  const model=document.getElementById('a-model').value||'';
   const res=await fetch(`/api/agent-add/${currentCompany}`,{
-    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,role,emoji,prompt,parent_agent:parentAgent}),signal:controller.signal
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,role,emoji,prompt,parent_agent:parentAgent,model}),signal:controller.signal
   });
   clearTimeout(timer);
   const data=await res.json();
@@ -1705,6 +1722,24 @@ async function deleteMilestone(mid){
   if(!confirm('삭제?'))return;
   await fetch(`/api/milestone/${currentCompany}/${mid}`,{method:'DELETE'});
   toast('🗑 삭제됨');renderMilestones();
+}
+
+// ─── Agent Model Change ───
+async function changeAgentModel(agentId){
+  if(!currentCompany)return;
+  try{
+    const res=await fetch('/api/models');
+    const data=await res.json();
+    const models=data.models||[];
+    if(!models.length){toast('사용 가능한 모델이 없습니다');return;}
+    const options=models.map(m=>`${m.id} (${m.name})`).join('\n');
+    const choice=prompt(`${agentId} 모델 변경\n현재: ${data.default}\n\n사용 가능:\n${options}\n\n모델 ID 입력:`);
+    if(!choice)return;
+    const r=await fetch(`/api/agent-model/${currentCompany}/${agentId}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:choice.trim()})});
+    const d=await r.json();
+    if(d.ok){toast(`🧠 ${agentId} 모델 → ${choice.trim()}`);renderInlineOrgChart();}
+    else toast('변경 실패: '+(d.error||''));
+  }catch(e){toast('오류: '+e.message);}
 }
 
 // ─── Sub-tab Switching ───
@@ -2840,6 +2875,8 @@ function renderInlineOrgChart(){
     const isLg=size==='lg';
     const costVal=(a.cost?.total_cost||0);
     const costHtml=costVal>0?`<div style="font-size:8px;color:#94a3b8;margin-top:2px">💰 $${costVal.toFixed(4)}</div>`:'';
+    const modelName=(a.model||'').split('/').pop()||'default';
+    const modelHtml=`<div style="font-size:7px;color:#475569;margin-top:1px;cursor:pointer" onclick="event.stopPropagation();changeAgentModel('${a.id}')" title="클릭하여 모델 변경">🧠 ${_esc(modelName)}</div>`;
     const thinkKey=`${currentCompany}:${a.id}`;
     const thinking=agentThinking[thinkKey];
     const liveHtml=thinking?`<div style="font-size:8px;color:#fbbf24;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">⚡ ${_esc((thinking.promptPreview||'').substring(0,25))}</div>`:'';
@@ -2854,7 +2891,7 @@ function renderInlineOrgChart(){
       <div style="font-size:${isLg?10:9}px;color:${sc};margin:2px 0"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${sc};margin-right:3px;vertical-align:middle;${a.status==='working'?'animation:pulse-border 1.5s infinite':''}"></span>${sl}</div>
       <div style="font-size:8px;color:#64748b">${_esc(a.role||'')}</div>
       ${total?`<div style="margin-top:4px;height:3px;background:#1e293b;border-radius:2px;overflow:hidden"><div style="height:100%;background:#3b82f6;border-radius:2px;width:${Math.round(done/total*100)}%"></div></div><div style="font-size:8px;color:#64748b;margin-top:1px">${done}/${total} 작업</div>`:''}
-      ${costHtml}${liveHtml}${actBtns}
+      ${modelHtml}${costHtml}${liveHtml}${actBtns}
     </div>`;
   };
   // Connector with optional glow

@@ -1878,8 +1878,9 @@ def nudge_agent(cid, text, target):
                     print(f"[escalation] {esc_key} max reached ({esc_count}), stopping")
                 if not escalated:
                     try:
+                        agent_model = agent.get('model', 'default')
                         lang = comp.get('lang', 'ko') if comp else 'ko'
-                        msg = _s('msg.no_reply', lang, emoji=emoji, name=agent_name)
+                        msg = f"⚠️ {emoji} {agent_name}이(가) 응답하지 않았습니다.\n💡 모델({agent_model})이 작동하지 않을 수 있습니다. 조직도에서 🧠 클릭으로 모델을 변경해보세요."
                         payload = json.dumps({"from": "시스템", "emoji": "⚠️", "text": msg}).encode()
                         _post_local(f'http://localhost:3000/api/agent-msg/{cid}', json.loads(payload))
                     except Exception as e:
@@ -2819,9 +2820,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
 
         parent_agent = body.get('parent_agent', '')
-        self._do_add_agent(cid, company, name, role, emoji, prompt, parent_agent)
+        model = body.get('model', '')
+        self._do_add_agent(cid, company, name, role, emoji, prompt, parent_agent, model)
 
-    def _do_add_agent(self, cid, company, name, role, emoji, prompt, parent_agent=''):
+    def _do_add_agent(self, cid, company, name, role, emoji, prompt, parent_agent='', model=''):
         aid = re.sub(r'[^a-z0-9]', '-', name.lower())
         agent_id = f"{cid}-{aid}"
         agent_workspace = DATA / cid / "workspaces" / aid
@@ -2834,6 +2836,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         }
         if parent_agent:
             agent['parent_agent'] = parent_agent
+        if model:
+            agent['model'] = model
         if not any(a['id'] == aid for a in company['agents']):
             company['agents'].append(agent)
             now = datetime.now().strftime('%H:%M')
@@ -3940,6 +3944,69 @@ async def api_update_contact(cid: str, contact_id: str, request: Request):
 def api_delete_contact(cid: str, contact_id: str):
     db_delete_contact(cid, contact_id)
     return {"ok": True}
+
+# ─── Model Management API ──────────────────────────────────────────────────
+
+@app.get("/api/models")
+def api_get_models():
+    """Return available models from openclaw config."""
+    config_path = Path.home() / '.openclaw' / 'openclaw.json'
+    models = []
+    primary = ''
+    try:
+        cfg = json.loads(config_path.read_text())
+        primary = cfg.get('agents', {}).get('defaults', {}).get('model', {}).get('primary', '')
+        for provider, info in cfg.get('models', {}).get('providers', {}).items():
+            for m in info.get('models', []):
+                mid = f"{provider}/{m['id']}"
+                models.append({'id': mid, 'name': m.get('name', m['id']), 'provider': provider,
+                               'reasoning': m.get('reasoning', False),
+                               'cost_input': m.get('cost', {}).get('input', 0),
+                               'cost_output': m.get('cost', {}).get('output', 0)})
+    except Exception:
+        pass
+    return {'models': models, 'default': primary}
+
+@app.get("/api/agent-model/{cid}/{agent_id}")
+def api_get_agent_model(cid: str, agent_id: str):
+    """Get current model for an agent."""
+    try:
+        result = subprocess.run(['openclaw', 'agents', 'list'], capture_output=True, text=True, timeout=10)
+        full_id = f"{cid}-{agent_id}"
+        for line in result.stdout.split('\n'):
+            if 'Model:' in line:
+                model = line.split('Model:')[1].strip()
+                return {'agent_id': agent_id, 'model': model}
+            if full_id in line:
+                # Next lines contain model info
+                continue
+    except Exception:
+        pass
+    return {'agent_id': agent_id, 'model': 'unknown'}
+
+@app.post("/api/agent-model/{cid}/{agent_id}")
+async def api_set_agent_model(cid: str, agent_id: str, request: Request):
+    """Change model for an agent by re-registering."""
+    body = await request.json()
+    new_model = body.get('model', '')
+    if not new_model:
+        return JSONResponse({"error": "model required"}, status_code=400)
+    # Update openclaw global config default
+    config_path = Path.home() / '.openclaw' / 'openclaw.json'
+    try:
+        cfg = json.loads(config_path.read_text())
+        # Set per-agent model override (store in company data)
+        company = get_company(cid)
+        if company:
+            for a in company.get('agents', []):
+                if a['id'] == agent_id:
+                    a['model'] = new_model
+                    break
+            update_company(cid, {'agents': company['agents']})
+        db_add_audit(cid, 'model_change', 'master', agent_id, f'model→{new_model}')
+        return {"ok": True, "model": new_model}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 # ── Static files (must be last — catches everything else) ──────────────────
 
