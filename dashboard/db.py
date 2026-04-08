@@ -1457,18 +1457,44 @@ def db_add_memory(cid, agent_id, content, importance=5, mem_type='observation'):
         conn.execute("DELETE FROM memory_stream WHERE company_id=? AND agent_id=? AND id NOT IN (SELECT id FROM memory_stream WHERE company_id=? AND agent_id=? ORDER BY id DESC LIMIT 100)", (cid, agent_id, cid, agent_id))
         conn.commit(); conn.close()
 
-def db_get_memories(cid, agent_id, limit=10):
-    """Get recent memories weighted by recency and importance."""
+def db_get_memories(cid, agent_id, query='', limit=10):
+    """Get memories weighted by recency × importance × relevance (keyword matching)."""
     with _get_lock(cid):
         _ensure_company_db(cid)
         conn = _conn(cid)
-        # Score = importance * recency (newer = higher)
         rows = conn.execute(
-            "SELECT content, importance, mem_type, created_at FROM memory_stream "
-            "WHERE company_id=? AND agent_id=? ORDER BY importance DESC, id DESC LIMIT ?",
-            (cid, agent_id, limit)).fetchall()
+            "SELECT content, importance, mem_type, created_at, id FROM memory_stream "
+            "WHERE company_id=? AND agent_id=? ORDER BY id DESC LIMIT 50",
+            (cid, agent_id)).fetchall()
         conn.close()
-    return [dict(r) for r in rows]
+    if not rows:
+        return []
+    import math
+    now_ts = datetime.utcnow().timestamp()
+    keywords = set(query.lower().split()) if query else set()
+    scored = []
+    for r in rows:
+        d = dict(r)
+        # Recency: exponential decay (0.995^hours)
+        try:
+            created = datetime.fromisoformat(d['created_at']).timestamp()
+            hours = max(0, (now_ts - created) / 3600)
+        except: hours = 24
+        recency = math.pow(0.995, hours)
+        # Importance: normalized 0-1
+        importance = (d.get('importance', 5) or 5) / 10.0
+        # Relevance: keyword overlap ratio
+        if keywords:
+            content_words = set(d['content'].lower().split())
+            overlap = len(keywords & content_words)
+            relevance = overlap / max(len(keywords), 1)
+        else:
+            relevance = 0.5  # neutral when no query
+        score = recency * importance * max(relevance, 0.1)
+        d['_score'] = round(score, 4)
+        scored.append(d)
+    scored.sort(key=lambda x: x['_score'], reverse=True)
+    return scored[:limit]
 
 # ─── CRM ───
 

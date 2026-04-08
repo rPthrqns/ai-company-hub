@@ -1893,7 +1893,7 @@ def nudge_agent(cid, text, target):
                 f"- [{t.get('agent_id','')}] {t.get('title','')} ({t.get('interval','')}분마다)"
                 for t in recurring[:5]))
         # Memory stream (Stanford GenAgents pattern)
-        memories = db_get_memories(cid, aid, limit=5)
+        memories = db_get_memories(cid, aid, query=msg, limit=5)
         if memories:
             mem_text = '\n'.join(f"- [{m.get('mem_type','obs')}] {m['content']}" for m in memories)
             ctx_parts.append(f"=== Memory ===\n{mem_text}")
@@ -2001,22 +2001,27 @@ def nudge_agent(cid, text, target):
                 escalated = False
                 comp = get_company(cid)
                 leader_id = get_leader_id(comp) if comp else 'ceo'
-                if esc_count <= 2:  # Max 2 escalations per agent
+                if esc_count <= 2:
                     if comp and aid != leader_id:
                         parent = next((a for a in comp.get('agents',[]) if a['id']==(agent.get('parent_agent') or leader_id)), None)
                         if parent and parent['id'] != aid:
-                            esc_text = f"⚠️ [{agent_name}] failed. Original: {text[:100]}\nPlease handle or suggest alternative."
-                            print(f"[escalation] {aid} → {parent['id']}: {text[:50]}")
-                            append_chat(cid, {"from": "시스템", "emoji": "🔺", "text": f"Escalation: {agent_name} → {parent['name']}", "time": datetime.now().strftime('%H:%M'), "type": "system"}, broadcast=True)
+                            esc_text = f"⚠️ {agent_name} 응답 실패. 원래 지시: {text[:80]}"
+                            print(f"[escalation] {aid} → {parent['id']}")
+                            append_chat(cid, {"from": "시스템", "emoji": "🔺", "text": f"🔺 {agent_name} → {parent['name']} 에스컬레이션", "time": datetime.now().strftime('%H:%M'), "type": "system"}, broadcast=True)
                             threading.Thread(target=nudge_agent, args=(cid, esc_text, parent['id'].upper()), daemon=True).start()
                             escalated = True
                     elif comp and aid == leader_id:
-                        append_approval(cid, {
-                            'id': str(uuid.uuid4())[:8], 'from_agent': agent_name, 'from_emoji': emoji,
-                            'type': 'escalation', 'detail': f"Leader failed:\n{text[:300]}",
-                            'status': 'pending', 'time': datetime.now().strftime('%H:%M'),
-                            'created_at': datetime.now().isoformat()
-                        })
+                        # Only create escalation approval if no duplicate pending
+                        existing = db_get_approvals(cid)
+                        has_esc = any(a.get('type')=='escalation' and a.get('status')=='pending' for a in existing)
+                        if not has_esc:
+                            append_approval(cid, {
+                                'id': str(uuid.uuid4())[:8], 'from_agent': agent_name, 'from_emoji': emoji,
+                                'type': 'escalation', 'title': f'{agent_name} 응답 실패',
+                                'detail': f"에이전트가 작업을 처리하지 못했습니다.\n지시: {text[:200]}",
+                                'status': 'pending', 'time': datetime.now().strftime('%H:%M'),
+                                'created_at': datetime.now().isoformat()
+                            })
                         escalated = True
                 else:
                     print(f"[escalation] {esc_key} max reached ({esc_count}), stopping")
@@ -2800,16 +2805,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 choice_pattern = re.findall(r'(?:^|\n)\s*(\d)[.):]\s*(.+?)(?:\n|$)', master_request)
             if len(choice_pattern) >= 2:
                 title = master_request.split('\n')[0].strip()[:60]
-                options = [{"key": k.strip(), "label": v.strip()[:80]} for k, v in choice_pattern]
-                append_approval(cid, {
-                    'id': str(uuid.uuid4())[:8], 'from_agent': from_agent, 'from_emoji': emoji,
-                    'approval_type': 'choice', 'category': 'decision', 'title': title,
-                    'detail': master_request[:500],
-                    'options': json.dumps(options, ensure_ascii=False),
-                    'status': 'pending', 'time': time_str,
-                    'created_at': datetime.now().isoformat()
-                })
-                print(f"[choice] {from_agent}: {title[:40]} ({len(options)} options)")
+                # Deduplicate: skip if same title already pending
+                existing_approvals = db_get_approvals(cid)
+                has_dup = any(a.get('title','') == title and a.get('status')=='pending' for a in existing_approvals)
+                if has_dup:
+                    print(f"[choice] duplicate skipped: {title[:40]}")
+                else:
+                    options = [{"key": k.strip(), "label": v.strip()[:80]} for k, v in choice_pattern]
+                    append_approval(cid, {
+                        'id': str(uuid.uuid4())[:8], 'from_agent': from_agent, 'from_emoji': emoji,
+                        'approval_type': 'choice', 'category': 'decision', 'title': title,
+                        'detail': master_request[:500],
+                        'options': json.dumps(options, ensure_ascii=False),
+                        'status': 'pending', 'time': time_str,
+                        'created_at': datetime.now().isoformat()
+                    })
+                    print(f"[choice] {from_agent}: {title[:40]} ({len(options)} options)")
         
         # 에이전트 응답에서 멘션 부분과 일반 부분 분리
         has_mentions = bool(re.search(r'@([A-Za-z0-9]+)', text))
