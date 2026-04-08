@@ -174,28 +174,33 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 #chat-init-overlay{position:absolute;inset:0;background:rgba(10,10,26,0.9);flex-direction:column;align-items:center;justify-content:center;z-index:10;border-radius:12px;gap:12px;text-align:center}
 .init-progress-bar{width:200px;height:5px;background:#1e293b;border-radius:3px;overflow:hidden}
 .init-progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:3px;transition:width .5s}
-/* Plan Task Tree */
-.plan-task-item{display:flex;align-items:flex-start;gap:6px;padding:4px 6px;border-radius:6px;margin-bottom:2px;cursor:pointer;transition:background .1s;position:relative}
-.plan-task-item:hover{background:#1a2332}
-.plan-task-item.depth-1{margin-left:20px}
-.plan-task-item.depth-2{margin-left:40px}
-.plan-task-item.depth-3{margin-left:60px}
-.plan-task-status{font-size:13px;flex-shrink:0;cursor:pointer;transition:transform .15s;margin-top:1px}
-.plan-task-status:hover{transform:scale(1.2)}
-.plan-task-body{flex:1;min-width:0}
-.plan-task-title{font-size:11px;color:#e2e8f0;line-height:1.4;word-break:break-word}
-.plan-task-title.done{color:#4ade80;text-decoration:line-through;opacity:.7}
-.plan-task-title.in_progress{color:#fbbf24}
-.plan-task-meta{font-size:9px;color:var(--dim);margin-top:2px;display:flex;gap:6px;align-items:center}
-.plan-task-actions{display:none;gap:3px;flex-shrink:0}
-.plan-task-item:hover .plan-task-actions{display:flex}
-.plan-task-act-btn{background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:1px 4px;border-radius:3px;transition:all .1s}
-.plan-task-act-btn:hover{background:#253047;color:var(--text)}
-.plan-add-inline{display:flex;gap:5px;align-items:center;padding:4px 6px;margin-bottom:4px}
-.plan-add-inline input{flex:1;background:var(--card);border:1px solid #374151;border-radius:5px;padding:4px 8px;color:var(--text);font-size:11px;outline:none}
+/* Plan Task Tree — Claude Code style */
+.plan-tree{font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:12px;line-height:1.6}
+.plan-node{position:relative;padding-left:20px}
+.plan-node::before{content:'';position:absolute;left:7px;top:0;bottom:0;width:1px;background:#1e3a5f}
+.plan-node:last-child::before{height:12px}
+.plan-node::after{content:'';position:absolute;left:7px;top:12px;width:10px;height:1px;background:#1e3a5f}
+.plan-root>.plan-node::before,.plan-root>.plan-node::after{display:none}
+.plan-root>.plan-node{padding-left:0}
+.plan-row{display:flex;align-items:center;gap:6px;padding:2px 4px;border-radius:4px;cursor:pointer;transition:background .1s}
+.plan-row:hover{background:rgba(59,130,246,.08)}
+.plan-chk{width:16px;height:16px;border:2px solid #334155;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;flex-shrink:0;font-size:10px}
+.plan-chk.done{background:#064e3b;border-color:#22c55e;color:#4ade80}
+.plan-chk.progress{background:#1c1917;border-color:#fbbf24;color:#fbbf24}
+.plan-chk:hover{border-color:var(--accent);transform:scale(1.1)}
+.plan-label{flex:1;color:#e2e8f0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plan-label.done{color:#64748b;text-decoration:line-through}
+.plan-label.progress{color:#fbbf24}
+.plan-agent{font-size:9px;color:#475569;background:#0f172a;padding:1px 5px;border-radius:3px;flex-shrink:0}
+.plan-acts{display:none;gap:2px;flex-shrink:0}
+.plan-row:hover .plan-acts{display:flex}
+.plan-acts button{background:none;border:none;color:#475569;cursor:pointer;font-size:10px;padding:1px 3px;border-radius:2px}
+.plan-acts button:hover{color:var(--text);background:#1e293b}
+.plan-pbar{height:3px;background:#0f172a;border-radius:2px;margin:2px 0 4px 22px;overflow:hidden}
+.plan-pfill{height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:2px;transition:width .4s}
+.plan-add-inline{display:flex;gap:5px;align-items:center;padding:2px 4px;margin:2px 0 2px 22px}
+.plan-add-inline input{flex:1;background:#0f172a;border:1px solid #1e3a5f;border-radius:4px;padding:3px 8px;color:var(--text);font-size:11px;outline:none;font-family:inherit}
 .plan-add-inline input:focus{border-color:var(--accent)}
-.plan-progress-bar{height:2px;background:#1e293b;border-radius:1px;margin-top:3px;overflow:hidden}
-.plan-progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:1px;transition:width .4s}
 
 .log-item{display:flex;gap:6px;padding:5px 0;border-bottom:1px solid #1a1a2e;font-size:10px;animation:fadeIn .2s}
 .log-avatar{width:22px;height:22px;border-radius:50%;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
@@ -2355,9 +2360,10 @@ function renderPlanTaskTree(){
     return;
   }
   const roots=cachedPlanTasks.filter(t=>!t.parent_id);
-  let html='';
+  let html='<div class="plan-tree"><div class="plan-root">';
   html+=_renderAddInline(null);
-  roots.forEach(t=>{html+=_renderPlanTask(t,0);});
+  roots.forEach(t=>{html+=_renderPlanNode(t);});
+  html+='</div></div>';
   el.innerHTML=html;
 }
 
@@ -2365,11 +2371,11 @@ function _renderAddInline(parentId){
   const key=parentId||'root';
   if(_planAddingParent!==key)return'';
   const agentOpts=(companies.find(c=>c.id===currentCompany)?.agents||[]).map(a=>`<option value="${a.id}">${a.emoji} ${a.name}</option>`).join('');
-  return `<div class="plan-add-inline" style="${parentId?'margin-left:'+((_getDepth(parentId)+1)*20)+'px':''}">
+  return `<div class="plan-add-inline">
     <input id="plan-add-input-${key}" placeholder="작업 제목..." onkeydown="if(event.key==='Enter')_submitPlanAdd('${parentId||''}');if(event.key==='Escape')_cancelPlanAdd()">
-    <select id="plan-add-agent-${key}" style="background:var(--card);border:1px solid #374151;border-radius:5px;padding:3px 5px;color:var(--text);font-size:10px;max-width:90px"><option value="">담당자</option>${agentOpts}</select>
-    <button onclick="_submitPlanAdd('${parentId||''}')" style="background:var(--accent);color:white;border:none;border-radius:5px;padding:3px 8px;font-size:10px;cursor:pointer">추가</button>
-    <button onclick="_cancelPlanAdd()" style="background:none;border:1px solid #374151;color:var(--dim);border-radius:5px;padding:3px 6px;font-size:10px;cursor:pointer">✕</button>
+    <select id="plan-add-agent-${key}" style="background:#0f172a;border:1px solid #1e3a5f;border-radius:4px;padding:2px 4px;color:var(--text);font-size:10px;max-width:80px"><option value="">담당</option>${agentOpts}</select>
+    <button onclick="_submitPlanAdd('${parentId||''}')" style="background:var(--accent);color:white;border:none;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer">↵</button>
+    <button onclick="_cancelPlanAdd()" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:10px">✕</button>
   </div>`;
 }
 
@@ -2379,40 +2385,31 @@ function _getDepth(parentId){
   return p?_getDepth(p.parent_id)+1:0;
 }
 
-function _renderPlanTask(task,depth){
+function _renderPlanNode(task){
   const s=task.status||'todo';
-  const statusIcon=s==='done'?'✅':s==='in-progress'?'🔄':s==='blocked'?'❌':'⬜';
-  const titleCls=s==='done'?'done':s==='in-progress'?'in_progress':'';
+  const chkCls=s==='done'?'done':s==='in-progress'?'progress':'';
+  const chkIcon=s==='done'?'✓':s==='in-progress'?'↻':'';
+  const labelCls=s==='done'?'done':s==='in-progress'?'progress':'';
   const children=cachedPlanTasks.filter(t=>t.parent_id===task.id);
   const total=children.length;
   const doneCount=children.filter(t=>t.status==='done').length;
   const agent=(companies.find(c=>c.id===currentCompany)?.agents||[]).find(a=>a.id===task.agent_id);
-  const agentLabel=agent?`${agent.emoji} ${agent.name}`:'';
-  const depthCls=depth>0?`depth-${Math.min(depth,3)}`:'';
-  const timeStr=''; // AI agents don't need timestamps — focus on status
-  const descSnippet=task.description?`<div style="font-size:9px;color:#64748b;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">${_esc(task.description.substring(0,60))}</div>`:'';
+  const agentTag=agent?`<span class="plan-agent">${agent.emoji||''} ${agent.name||task.agent_id}</span>`:'';
 
-  let html=`<div class="plan-task-item ${depthCls}" id="pti-${task.id}">
-    <span class="plan-task-status" onclick="cyclePlanStatus('${task.id}')" title="상태 변경">${statusIcon}</span>
-    <div class="plan-task-body">
-      <div class="plan-task-title ${titleCls}">${_esc(task.title)}</div>
-      ${descSnippet}
-      ${total>0?`<div class="plan-progress-bar"><div class="plan-progress-fill" style="width:${Math.round(doneCount/total*100)}%"></div></div>`:''}
-      <div class="plan-task-meta">
-        ${agentLabel?`<span>${agentLabel}</span>`:''}
-        ${total>0?`<span>${doneCount}/${total}</span>`:''}
-        ${timeStr?`<span style="margin-left:auto;color:#475569">${timeStr}</span>`:''}
+  let html=`<div class="plan-node" id="pti-${task.id}">
+    <div class="plan-row" onclick="cyclePlanStatus('${task.id}')">
+      <div class="plan-chk ${chkCls}" title="클릭: 상태 변경">${chkIcon}</div>
+      <span class="plan-label ${labelCls}">${_esc(task.title)}</span>
+      ${agentTag}
+      <div class="plan-acts" onclick="event.stopPropagation()">
+        <button onclick="addPlanTask('${task.id}')" title="하위 추가">＋</button>
+        <button onclick="deletePlanTask('${task.id}')" title="삭제">✕</button>
       </div>
     </div>
-    <div class="plan-task-actions">
-      <button class="plan-task-act-btn" onclick="addPlanTask('${task.id}')" title="하위 추가">＋</button>
-      <button class="plan-task-act-btn" onclick="deletePlanTask('${task.id}')" title="삭제">🗑</button>
-    </div>
-  </div>`;
-  // Sub-task add inline
+    ${total>0?`<div class="plan-pbar"><div class="plan-pfill" style="width:${Math.round(doneCount/total*100)}%"></div></div>`:''}`;
   html+=_renderAddInline(task.id);
-  // Children
-  children.forEach(child=>{html+=_renderPlanTask(child,depth+1);});
+  children.forEach(child=>{html+=_renderPlanNode(child);});
+  html+='</div>';
   return html;
 }
 
