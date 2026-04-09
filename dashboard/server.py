@@ -314,12 +314,17 @@ def process_task_commands(cid, text, agent_id):
         print(f"[cron_cmds] {agent_id}: {'; '.join(results)}")
 
     # APPROVAL 명령: [APPROVAL:카테고리:제목:내용] 또는 [APPROVAL:제목:내용]
+    existing_approvals = db_get_approvals(cid) if re.search(r'\[APPROVAL:', text) else []
     for m in re.finditer(r'\[APPROVAL:([^:\]]+):([^:\]]+)(?::([^\]]*))?\]', text):
         parts = [m.group(1).strip(), m.group(2).strip(), (m.group(3) or '').strip()]
         if len(parts[0]) <= 10 and parts[0] in ('예산','구매','프로젝트','인사','정책','기타','budget','purchase','project','hr','policy','general'):
             cat, title, detail = parts[0], parts[1], parts[2]
         else:
             cat, title, detail = 'general', parts[0], parts[1]
+        # Dedup: skip if a pending approval with same title already exists
+        if any(a.get('title','') == title and a.get('status') == 'pending' for a in existing_approvals):
+            print(f"[approval] SKIP duplicate: {cat}/{title} (already pending)")
+            continue
         company = get_company(cid)
         agent = next((a for a in company.get('agents',[]) if a['id']==agent_id), None) if company else None
         agent_name = agent.get('name','') if agent else agent_id
@@ -339,6 +344,7 @@ def process_task_commands(cid, text, agent_id):
             'comments': '[]'
         }
         append_approval(cid, approval)
+        existing_approvals.append(approval)  # prevent dups within same batch
         results.append(f"📋 기안 '{title}' 제출됨 (결재라인: {' → '.join(approval_line)})")
         print(f"[approval] {agent_id} submitted: {cat}/{title}")
     
@@ -3345,66 +3351,54 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 _AGENT_BUSY.discard(k)
         for k in [k for k in _ESCALATION_COUNTS if k.startswith(f"{cid}:")]:
             _ESCALATION_COUNTS.pop(k, None)
-        # Broadcast deletion immediately so UI updates
+        # Delete DB and files SYNCHRONOUSLY (so UI sees it gone immediately)
+        db_delete_company(cid)
+        for suffix in ['.json', '.json.bak', '-queue.json', '-queue.json.bak']:
+            f = DATA / f"{cid}{suffix}"
+            if f.exists():
+                try: f.unlink()
+                except OSError: pass
+        try:
+            companies = load_json(COMPANIES_FILE)
+            companies = [c for c in companies if c["id"] != cid]
+            save_json(COMPANIES_FILE, companies)
+        except Exception: pass
+        # Broadcast + respond
         sse_broadcast('company_update', {"id": cid, "deleted": True})
-        # Return ok immediately, do everything else in background
         self._json({"ok": True})
-        def _bg_full_delete():
-            # Kill any running openclaw processes for this company
+        # Agent process cleanup in background (slow, best-effort)
+        def _bg_delete_agents():
             import signal
             for aid in agent_ids:
                 try:
-                    # Kill any running processes
                     result = subprocess.run(['pgrep', '-f', aid], capture_output=True, text=True, timeout=5)
                     for pid in result.stdout.strip().split('\n'):
                         if pid.strip():
                             try: os.kill(int(pid.strip()), signal.SIGTERM)
                             except: pass
                 except: pass
-            # Delete agents from openclaw (with retry)
             failed = []
             for aid in agent_ids:
                 try:
                     ok = RUNTIME.delete(aid)
-                    if ok:
-                        print(f"[delete] agent {aid} removed")
-                    else:
-                        failed.append(aid)
-                        print(f"[delete] agent {aid} failed, queued for retry")
+                    print(f"[delete] agent {aid} {'removed' if ok else 'failed'}")
+                    if not ok: failed.append(aid)
                 except Exception as e:
                     failed.append(aid)
-                    print(f"[delete] agent {aid} error: {e}, queued for retry")
-            # Retry failed deletions (up to 2 more attempts with delay)
+                    print(f"[delete] agent {aid} error: {e}")
             for attempt in range(2):
                 if not failed: break
                 time.sleep(5)
                 still_failed = []
                 for aid in failed:
                     try:
-                        ok = RUNTIME.delete(aid)
-                        if ok:
-                            print(f"[delete] agent {aid} removed (retry {attempt+1})")
-                        else:
-                            still_failed.append(aid)
-                    except:
-                        still_failed.append(aid)
+                        if RUNTIME.delete(aid): print(f"[delete] agent {aid} removed (retry {attempt+1})")
+                        else: still_failed.append(aid)
+                    except: still_failed.append(aid)
                 failed = still_failed
-            if failed:
-                print(f"[delete] agents still remaining after retries: {failed}")
-            # Delete DB and files
-            db_delete_company(cid)
-            for suffix in ['.json', '.json.bak', '-queue.json', '-queue.json.bak']:
-                f = DATA / f"{cid}{suffix}"
-                if f.exists():
-                    try: f.unlink()
-                    except OSError: pass
-            try:
-                companies = load_json(COMPANIES_FILE)
-                companies = [c for c in companies if c["id"] != cid]
-                save_json(COMPANIES_FILE, companies)
-            except Exception: pass
-            print(f"[delete] company {cid} fully deleted")
-        threading.Thread(target=_bg_full_delete, daemon=True).start()
+            if failed: print(f"[delete] orphan agents: {failed}")
+            else: print(f"[delete] company {cid} fully cleaned")
+        threading.Thread(target=_bg_delete_agents, daemon=True).start()
 
     # ─── Agent Add Handler ───
     def _handle_agent_add(self, path, body):

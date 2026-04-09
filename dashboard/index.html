@@ -22,170 +22,106 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .hdr-btn:hover{border-color:var(--accent);color:var(--text)}
 .btn-primary{background:var(--accent);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer}
 
-/* Banner */
-.banner{background:#1a1500;border-bottom:1px solid #332200;padding:4px 16px;display:none;align-items:center;gap:8px;font-size:10px;color:#fbbf24;flex-shrink:0}
-.banner.show{display:flex}
-.banner button{border:1px solid #92400e;border-radius:3px;padding:2px 6px;font-size:9px;cursor:pointer;background:transparent;color:#fbbf24}
+/* Main layout: icon grid (left) + status panel (right) */
+.dashboard{flex:1;display:flex;overflow:hidden;min-height:0}
+.dash-left{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.dash-right{width:320px;flex-shrink:0;border-left:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;overflow:hidden;transition:width .2s}
+.dash-right.collapsed{width:0;border-left:none}
 
-/* Narrative Panel */
-.narrative-panel{background:linear-gradient(135deg,#111827ee,#1a1a2eee);border:1px solid var(--border);border-radius:8px;
-  position:absolute;top:8px;left:12px;right:12px;z-index:10;display:none;overflow:hidden;
-  backdrop-filter:blur(8px);box-shadow:0 4px 24px rgba(0,0,0,.5)}
-.narrative-header{display:flex;align-items:center;gap:6px;padding:8px 12px;cursor:pointer;font-size:12px;font-weight:600;color:#fbbf24;user-select:none}
-.narrative-header:hover{background:rgba(251,191,36,.05)}
-.narrative-toggle{font-size:9px;color:var(--dim);transition:transform .2s}
-.narrative-panel.open .narrative-toggle{transform:rotate(90deg)}
-.narrative-body{max-height:0;overflow:hidden;transition:max-height .3s ease}
-.narrative-panel.open .narrative-body{max-height:130px;overflow-y:auto}
-.narrative-event{display:flex;align-items:flex-start;gap:6px;padding:4px 12px;font-size:11px;line-height:1.5;border-top:1px solid rgba(30,58,95,.4)}
-.narrative-event .ne-icon{flex-shrink:0;width:16px;text-align:center}
-.narrative-event .ne-text{flex:1;color:var(--text)}
-.narrative-event .ne-time{flex-shrink:0;font-size:9px;color:var(--dim);min-width:36px;text-align:right}
-.narrative-event.warning{background:rgba(251,191,36,.08)}
-.narrative-event.warning .ne-text{color:#fbbf24}
-.narrative-event.done .ne-text{color:var(--green)}
-.narrative-event.approval .ne-text{color:#f59e0b}
-.narrative-event.milestone .ne-text{color:#a78bfa}
-.narrative-empty{padding:8px 12px;font-size:11px;color:var(--dim);text-align:center}
+/* Agent icon grid */
+.icon-grid{display:flex;flex-wrap:wrap;gap:16px;padding:20px;align-content:flex-start;justify-content:center}
+.agent-icon{position:relative;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;transition:transform .15s}
+.agent-icon:hover{transform:translateY(-2px)}
+.agent-icon.selected .ai-circle{border-color:var(--accent);box-shadow:0 0 12px rgba(59,130,246,.4)}
+.ai-circle{width:52px;height:52px;border-radius:50%;border:2.5px solid #334155;display:flex;align-items:center;justify-content:center;font-size:24px;background:var(--card);transition:all .2s;position:relative}
+/* Status ring colors */
+.agent-icon.s-working .ai-circle{border-color:#3b82f6;box-shadow:0 0 8px rgba(59,130,246,.3);animation:ringPulse 2s ease-in-out infinite}
+.agent-icon.s-thinking .ai-circle{border-color:#fbbf24;box-shadow:0 0 10px rgba(251,191,36,.4);animation:ringPulse 1.2s ease-in-out infinite}
+.agent-icon.s-active .ai-circle{border-color:#00ff88;box-shadow:0 0 6px rgba(0,255,136,.2)}
+.agent-icon.s-idle .ai-circle{border-color:#334155;opacity:.45}
+.agent-icon.s-registering .ai-circle{border-color:#a78bfa;border-style:dashed;animation:ringSpin 3s linear infinite}
+@keyframes ringPulse{0%,100%{box-shadow:0 0 4px currentColor}50%{box-shadow:0 0 16px currentColor}}
+@keyframes ringSpin{to{transform:rotate(360deg)}}
+/* Status dot */
+.ai-dot{position:absolute;bottom:1px;right:1px;width:10px;height:10px;border-radius:50%;border:2px solid var(--card)}
+.s-working .ai-dot{background:#3b82f6}
+.s-thinking .ai-dot{background:#fbbf24;animation:dotBlink .8s infinite}
+.s-active .ai-dot{background:#00ff88}
+.s-idle .ai-dot{background:#475569}
+.s-registering .ai-dot{background:#a78bfa;animation:dotBlink 1s infinite}
+@keyframes dotBlink{0%,100%{opacity:1}50%{opacity:.3}}
+/* Name label */
+.ai-name{font-size:9px;color:var(--dim);text-align:center;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-icon.selected .ai-name{color:var(--text);font-weight:600}
+/* Connection lines between agents (subtle) */
+.ai-link{font-size:7px;color:var(--dim);position:absolute;top:-8px;right:-4px;opacity:0}
+.agent-icon.s-working .ai-link,.agent-icon.s-thinking .ai-link{opacity:1}
 
-/* Fog of War Map */
-.fog-map{flex:1;overflow:auto;position:relative;background:var(--bg);cursor:grab}
-.fog-map:active{cursor:grabbing}
-.map-zoom-ctrl{position:absolute;bottom:12px;left:12px;z-index:10;display:flex;gap:4px}
-.map-zoom-ctrl button{width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--text);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center}
-.map-zoom-ctrl button:hover{background:var(--card);border-color:var(--accent)}
-.map-zoom-ctrl span{font-size:9px;color:var(--dim);line-height:28px;padding:0 4px}
-.fog-map::before{content:'';position:absolute;inset:0;pointer-events:none;
-  background-image:linear-gradient(rgba(30,58,95,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(30,58,95,.12) 1px,transparent 1px);
-  background-size:40px 40px;z-index:0}
-.map-grid{display:grid;gap:6px;padding:24px;position:relative;z-index:1;transform-origin:center center;transition:transform .2s ease;
-  justify-content:center;margin:0 auto;min-height:100%}
-.map-block{width:120px;height:90px;border-radius:10px;position:relative;cursor:default;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-  transition:all .4s ease;font-size:11px;overflow:hidden;border:1.5px solid transparent}
-.map-block.working,.map-block.thinking{width:140px;height:110px;z-index:2}
+/* Status Panel (right side — character sheet) */
+.status-panel{flex:1;overflow-y:auto;padding:16px}
+.sp-empty{display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim);font-size:11px;text-align:center;padding:20px}
+.sp-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.sp-avatar{width:48px;height:48px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:24px;background:var(--card);flex-shrink:0}
+.sp-name{font-size:16px;font-weight:700;color:#f1f5f9}
+.sp-role{font-size:11px;color:var(--dim)}
+.sp-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;margin-top:4px}
+.sp-badge .dot{width:6px;height:6px;border-radius:50%}
+.sb-working{background:rgba(59,130,246,.15);color:#60a5fa}.sb-working .dot{background:#3b82f6}
+.sb-thinking{background:rgba(251,191,36,.15);color:#fbbf24}.sb-thinking .dot{background:#fbbf24}
+.sb-active{background:rgba(0,255,136,.1);color:#00ff88}.sb-active .dot{background:#00ff88}
+.sb-idle{background:rgba(100,116,139,.15);color:#64748b}.sb-idle .dot{background:#64748b}
+.sb-registering{background:rgba(139,92,246,.15);color:#a78bfa}.sb-registering .dot{background:#a78bfa}
 
-/* Fog state */
-.map-block.fog{background:rgba(15,23,42,.7);border-color:rgba(30,58,95,.2);opacity:.18;cursor:default}
-.map-block.fog::after{content:'';position:absolute;inset:0;border-radius:10px;
-  background:linear-gradient(135deg,rgba(100,116,139,.08),transparent,rgba(100,116,139,.06));
-  animation:fogShimmer 6s ease-in-out infinite alternate}
-@keyframes fogShimmer{0%{opacity:.3}50%{opacity:.7}100%{opacity:.4}}
+/* Status sections */
+.sp-section{margin-bottom:14px}
+.sp-label{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;font-weight:600}
+.sp-task{background:var(--card);border-radius:6px;padding:8px 10px;font-size:11px;color:var(--text);border-left:3px solid var(--accent)}
+.sp-task.done{border-left-color:var(--green);opacity:.7}
+.sp-task-title{font-weight:600;margin-bottom:2px}
+.sp-task-status{font-size:9px;color:var(--dim)}
+.sp-no-task{font-size:10px;color:var(--dim);padding:6px 0}
+.sp-activity{font-size:10px;line-height:1.6;color:#94a3b8;background:var(--card);border-radius:6px;padding:8px 10px;max-height:120px;overflow-y:auto;white-space:pre-wrap}
+.sp-act-time{font-size:8px;color:var(--dim)}
+.sp-msg-btn{width:100%;background:var(--accent);color:white;border:none;border-radius:8px;padding:8px;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px}
+.sp-msg-btn:hover{background:#2563eb}
 
-/* Hazy state */
-.map-block.hazy{background:rgba(30,41,59,.6);border-color:rgba(51,65,85,.5);opacity:.55;cursor:default}
-.map-block.hazy .block-title{opacity:.6}
-.map-block.hazy::after{content:'';position:absolute;inset:0;border-radius:10px;
-  background:radial-gradient(ellipse at center,rgba(100,116,139,.1),transparent);
-  animation:hazyPulse 3s ease-in-out infinite}
-@keyframes hazyPulse{0%,100%{opacity:.3}50%{opacity:.8}}
-
-/* Working/Pulsing state */
-.map-block.working{background:rgba(30,41,59,.95);opacity:1;cursor:pointer;
-  border-width:2px;animation:workingPulse 1.5s ease-in-out infinite;position:relative;overflow:visible}
-.map-block.working::after{content:'';position:absolute;inset:-4px;border-radius:14px;
-  border:2px dashed rgba(59,130,246,.5);animation:workingSpin 8s linear infinite}
-.map-block.working .block-title{color:#f1f5f9;font-weight:700;font-size:11px}
-.map-block.working .block-speech{font-size:8px;color:#94a3b8;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
-@keyframes workingPulse{0%,100%{box-shadow:0 0 10px rgba(59,130,246,.3),inset 0 0 15px rgba(59,130,246,.05)}50%{box-shadow:0 0 30px rgba(59,130,246,.6),inset 0 0 25px rgba(59,130,246,.1)}}
-@keyframes workingSpin{to{transform:rotate(360deg)}}
-
-/* Thinking state (agent is actively processing) */
-.map-block.thinking{background:rgba(30,41,59,.95);opacity:1;cursor:pointer;
-  border-width:2px;border-color:rgba(251,191,36,.7)!important;animation:thinkingGlow 1s ease-in-out infinite;position:relative;overflow:visible}
-.map-block.thinking::after{content:'⚡';position:absolute;top:-8px;right:-8px;font-size:16px;
-  animation:thinkingBolt .8s ease-in-out infinite;z-index:3}
-.map-block.thinking .block-title{color:#fbbf24;font-weight:700}
-@keyframes thinkingGlow{0%,100%{box-shadow:0 0 15px rgba(251,191,36,.3)}50%{box-shadow:0 0 40px rgba(251,191,36,.7),0 0 60px rgba(251,191,36,.2)}}
-@keyframes thinkingBolt{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.3);opacity:.5}}
-
-/* Done/Bright state */
-.map-block.done{background:rgba(30,41,59,.95);opacity:1;cursor:pointer;
-  border-color:rgba(34,197,94,.45);box-shadow:0 0 12px rgba(34,197,94,.15)}
-.map-block.done:hover{box-shadow:0 0 24px rgba(34,197,94,.3);transform:translateY(-2px)}
-.map-block.done .block-title{color:#f1f5f9;font-weight:700}
-
-/* Blocked/Error state */
-.map-block.blocked{background:rgba(30,41,59,.85);opacity:1;cursor:pointer;
-  border-color:rgba(239,68,68,.6);animation:blockedGlow 1.5s ease-in-out infinite}
-@keyframes blockedGlow{0%,100%{box-shadow:0 0 8px rgba(239,68,68,.2)}50%{box-shadow:0 0 18px rgba(239,68,68,.45)}}
-
-/* HQ Block */
-.map-block.hq{background:linear-gradient(135deg,#1e293b,#1a1a2e);border-color:rgba(123,104,238,.5);
-  box-shadow:0 0 20px rgba(123,104,238,.2);opacity:1;cursor:default;width:140px;height:100px}
-.map-block.hq .block-title{font-size:13px;font-weight:700;color:#e0e7ff}
-.map-block.hq .block-sub{font-size:9px;color:#a5b4fc}
-
-/* Quadrant tints */
-.map-block.q-dev{border-color:rgba(59,130,246,.35)}
-.map-block.q-dev.working{border-color:rgba(59,130,246,.7)}
-.map-block.q-plan{border-color:rgba(139,92,246,.35)}
-.map-block.q-plan.working{border-color:rgba(139,92,246,.7)}
-.map-block.q-market{border-color:rgba(34,197,94,.35)}
-.map-block.q-market.working{border-color:rgba(34,197,94,.7)}
-.map-block.q-design{border-color:rgba(236,72,153,.35)}
-.map-block.q-design.working{border-color:rgba(236,72,153,.7)}
-
-/* Quadrant background tints for non-fog */
-.map-block.q-dev:not(.fog){background-image:linear-gradient(135deg,rgba(59,130,246,.08),transparent)}
-.map-block.q-plan:not(.fog){background-image:linear-gradient(135deg,rgba(139,92,246,.08),transparent)}
-.map-block.q-market:not(.fog){background-image:linear-gradient(135deg,rgba(34,197,94,.08),transparent)}
-.map-block.q-design:not(.fog){background-image:linear-gradient(135deg,rgba(236,72,153,.08),transparent)}
-
-/* Block contents */
-.block-icon{font-size:16px}
-.block-title{font-size:10px;color:#94a3b8;text-align:center;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.block-sub{font-size:8px;color:var(--dim)}
-.block-agent{position:absolute;top:4px;right:4px;font-size:14px;
-  filter:drop-shadow(0 0 3px rgba(0,0,0,.5));z-index:2;animation:agentFloat 3s ease-in-out infinite}
-@keyframes agentFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
-.block-result{font-size:8px;color:var(--green);margin-top:2px;cursor:pointer}
-.block-result:hover{text-decoration:underline}
-.block-progress{width:70%;height:3px;background:#1e293b;border-radius:2px;overflow:hidden;margin-top:3px}
-.block-progress-fill{height:100%;border-radius:2px;transition:width .4s}
-@keyframes progressPulse{0%,100%{opacity:1}50%{opacity:.4}}
-
-/* Quadrant labels */
-.quadrant-label{position:absolute;font-size:10px;font-weight:700;letter-spacing:1px;opacity:.25;pointer-events:none;z-index:0;text-transform:uppercase}
-.ql-dev{top:12px;right:24px;color:#3b82f6}
-.ql-plan{top:12px;left:24px;color:#8b5cf6}
-.ql-market{bottom:12px;left:24px;color:#22c55e}
-.ql-design{bottom:12px;right:24px;color:#ec4899}
-
-/* Block detail popup */
-.block-popup{position:fixed;z-index:200;background:#111827;border:1px solid var(--border);border-radius:12px;
-  padding:16px;width:320px;max-height:400px;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.6);
-  animation:bubbleIn .2s ease}
-.block-popup h4{font-size:13px;color:#f1f5f9;margin-bottom:8px}
-.block-popup .bp-close{position:absolute;top:8px;right:10px;background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px}
-.block-popup .bp-agent{font-size:10px;color:#a5b4fc;margin-bottom:6px}
-.block-popup .bp-content{font-size:11px;color:var(--text);line-height:1.6;white-space:pre-wrap}
-.block-popup .bp-status{display:inline-block;padding:2px 8px;border-radius:8px;font-size:9px;font-weight:600;margin-bottom:8px}
-
-/* Tooltip on hover */
-.map-block .block-tooltip{display:none;position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
-  background:#1e293b;border:1px solid #334155;border-radius:8px;padding:6px 10px;font-size:9px;
-  color:var(--text);white-space:nowrap;z-index:100;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.4)}
-.map-block:not(.fog):hover .block-tooltip{display:block}
+/* Task overview (below icon grid) */
+.task-area{flex:1;overflow-y:auto;border-top:1px solid var(--border);padding:12px 16px}
+.section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.section-title{font-size:11px;font-weight:700;color:var(--dim);display:flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:.5px}
+.section-count{font-size:9px;color:var(--dim);background:var(--card);padding:1px 6px;border-radius:8px}
+.task-list{display:flex;flex-direction:column;gap:4px}
+.task-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--card);font-size:11px;cursor:pointer;transition:background .1s}
+.task-row:hover{background:#253349}
+.task-row .tr-icon{font-size:12px;flex-shrink:0}
+.task-row .tr-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.task-row .tr-agent{font-size:10px;color:var(--dim);flex-shrink:0}
+.task-row .tr-status{font-size:9px;padding:1px 6px;border-radius:6px;flex-shrink:0}
+.task-row.tr-done{opacity:.5}
+.task-row.tr-done .tr-title{text-decoration:line-through}
 
 /* Command Bar */
-.cmd-bar{flex-shrink:0;background:var(--panel);border-top:1px solid var(--border);padding:6px 16px;display:none;gap:8px;align-items:center}
-.cmd-bar.show{display:flex}
-.cmd-chips{display:flex;gap:3px;flex-shrink:0;overflow-x:auto}
-.cmd-chip{background:var(--card);border:1px solid #374151;border-radius:12px;padding:3px 8px;font-size:10px;cursor:pointer;white-space:nowrap;color:var(--dim)}
-.cmd-chip:hover{border-color:var(--accent);color:var(--text)}
+.bottom-bar{flex-shrink:0;display:flex;flex-direction:column;background:var(--panel);border-top:1px solid var(--border)}
+.cmd-bar{padding:6px 12px;display:flex;flex-direction:column;gap:4px}
+.cmd-normal{display:flex;gap:8px;align-items:center}
+.cmd-approval{display:flex;gap:6px;align-items:center;background:#1a1500;border:1px solid #332200;border-radius:10px;padding:4px 8px}
+.apr-info{flex:1;font-size:11px;color:#fbbf24;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.apr-info .apr-from{font-size:9px;color:#92400e;font-weight:400;margin-left:4px}
+.apr-comment{flex:1;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;min-width:80px}
+.apr-comment:focus{border-color:#fbbf24}
+.apr-comment::placeholder{color:#475569}
+.apr-btn{border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap}
+.apr-yes{background:#064e3b;color:#6ee7b7}.apr-yes:hover{background:#065f46}
+.apr-no{background:#7f1d1d;color:#fca5a5}.apr-no:hover{background:#991b1b}
+.apr-nav{background:none;border:none;color:#92400e;cursor:pointer;font-size:12px;padding:2px 4px;flex-shrink:0}
+.apr-nav:hover{color:#fbbf24}
+.apr-skip{background:none;border:none;color:#475569;cursor:pointer;font-size:11px;padding:2px 4px;flex-shrink:0}
+.apr-skip:hover{color:var(--text)}
 .cmd-input{flex:1;background:var(--card);border:1px solid #374151;border-radius:10px;padding:8px 14px;color:var(--text);font-size:13px;outline:none}
 .cmd-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(59,130,246,.2)}
 .cmd-input::placeholder{color:#475569}
-.cmd-send{background:var(--accent);color:white;border:none;border-radius:10px;padding:8px 18px;cursor:pointer;font-size:12px;font-weight:600;transition:all .15s}
+.cmd-send{background:var(--accent);color:white;border:none;border-radius:10px;padding:8px 18px;cursor:pointer;font-size:12px;font-weight:600}
 .cmd-send:active{transform:scale(.95)}
-.cmd-sent{display:none;align-items:center;gap:8px;font-size:11px;overflow:hidden}
-.cmd-bar.show .cmd-sent.visible{display:flex}
-.cmd-sent-msg{color:#a5b4fc;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;animation:sentSlideIn .3s ease}
-.cmd-sent-status{color:var(--dim);font-size:10px;display:flex;align-items:center;gap:4px}
-.cmd-sent-status .dot-pulse{width:6px;height:6px;border-radius:50%;background:var(--yellow);animation:dotPulse 1s ease-in-out infinite}
-@keyframes sentSlideIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
-@keyframes dotPulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}
 
 /* Side drawer */
 .drawer-toggle{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:50;display:flex;flex-direction:column;gap:2px}
@@ -213,7 +149,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .plan-chk{width:16px;height:16px;border:2px solid #334155;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;flex-shrink:0;font-size:10px}
 .plan-chk.done{background:#064e3b;border-color:#22c55e;color:#4ade80}
 .plan-chk.progress{background:#1c1917;border-color:#fbbf24;color:#fbbf24}
-.plan-chk:hover{border-color:var(--accent);transform:scale(1.1)}
+.plan-chk:hover{border-color:var(--accent)}
 .plan-label{flex:1;color:#e2e8f0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .plan-label.done{color:#64748b;text-decoration:line-through}
 .plan-label.progress{color:#fbbf24}
@@ -227,7 +163,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .plan-add-inline{display:flex;gap:5px;align-items:center;padding:2px 4px;margin:2px 0 2px 22px}
 .plan-add-inline input{flex:1;background:#0f172a;border:1px solid #1e3a5f;border-radius:4px;padding:3px 8px;color:var(--text);font-size:11px;outline:none;font-family:inherit}
 
-/* Task/Approval items */
+/* Drawer items */
 .task-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;margin-bottom:3px;font-size:10px;background:var(--card);border-left:3px solid var(--dim)}
 .task-item.done{border-left-color:var(--green);opacity:.6}
 .task-item.progress{border-left-color:var(--yellow)}
@@ -235,6 +171,14 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .appr-card button{border:none;border-radius:4px;padding:4px 12px;font-size:10px;cursor:pointer;font-weight:600}
 .file-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid #1e293b;font-size:10px;cursor:pointer}
 .file-item:hover{background:#1a2332}
+
+/* Detail popup */
+.detail-popup{position:fixed;z-index:200;background:#111827;border:1px solid var(--border);border-radius:12px;
+  padding:16px;width:360px;max-height:400px;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.6);
+  top:50%;left:50%;transform:translate(-50%,-50%)}
+.detail-popup h4{font-size:13px;color:#f1f5f9;margin-bottom:8px}
+.detail-popup .dp-close{position:absolute;top:8px;right:10px;background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px}
+.detail-popup .dp-content{font-size:11px;color:var(--text);line-height:1.6;white-space:pre-wrap}
 
 /* Empty state */
 .empty{display:none;text-align:center;padding:80px 20px;color:var(--dim);flex:1}
@@ -254,11 +198,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .lang-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:999;align-items:center;justify-content:center}
 /* Toast */
 .toasts{position:fixed;bottom:60px;right:20px;z-index:500;display:flex;flex-direction:column;gap:6px}
-.toast{background:#1e293b;color:var(--text);padding:8px 16px;border-radius:8px;font-size:11px;border-left:3px solid var(--accent);animation:bubbleIn .3s}
+.toast{background:#1e293b;color:var(--text);padding:8px 16px;border-radius:8px;font-size:11px;border-left:3px solid var(--accent)}
 
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-@keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
-@keyframes bubbleIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 ::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:#334155;border-radius:2px}
 </style>
 </head>
@@ -293,9 +235,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   <button onclick="openCreate()" class="btn-primary">＋</button>
 </div>
 
-<!-- Approval Banner -->
-<div class="banner" id="banner"></div>
-
 <!-- Empty State -->
 <div class="empty" id="empty">
   <div style="font-size:56px;margin-bottom:16px">🏢</div>
@@ -304,39 +243,43 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   <button onclick="openCreate()" class="btn-primary" style="padding:12px 28px;font-size:14px">＋ 새 회사 만들기</button>
 </div>
 
-<!-- Fog of War Map (main area) -->
-<div class="fog-map" id="fog-map" style="display:none">
-  <!-- Event Narrative Panel (overlays on top of map) -->
-  <div class="narrative-panel open" id="narrative-panel">
-    <div class="narrative-header" onclick="toggleNarrative()">
-      <span class="narrative-toggle">▶</span>
-      <span>📰 오늘의 사건</span>
-      <span id="narrative-count" style="font-size:9px;color:var(--dim);font-weight:400"></span>
+<!-- Main Dashboard -->
+<div class="dashboard" id="dashboard" style="display:none">
+  <!-- Left: icons + tasks -->
+  <div class="dash-left">
+    <div class="icon-grid" id="icon-grid"></div>
+    <div class="task-area" id="task-area">
+      <div class="section-head">
+        <span class="section-title">작업 현황 <span class="section-count" id="task-count">0</span></span>
+      </div>
+      <div class="task-list" id="task-list"></div>
     </div>
-    <div class="narrative-body" id="narrative-body"></div>
   </div>
-  <div class="quadrant-label ql-plan">기획 Planning</div>
-  <div class="quadrant-label ql-dev">개발 Development</div>
-  <div class="quadrant-label ql-market">마케팅 Marketing</div>
-  <div class="quadrant-label ql-design">디자인 Design</div>
-  <div class="map-grid" id="map-grid"></div>
-  <div class="map-zoom-ctrl">
-    <button onclick="mapZoom(-1)" title="축소">−</button>
-    <span id="zoom-level">100%</span>
-    <button onclick="mapZoom(1)" title="확대">+</button>
-    <button onclick="mapZoom(0)" title="리셋">⟲</button>
+  <!-- Right: character status panel -->
+  <div class="dash-right" id="dash-right">
+    <div class="status-panel" id="status-panel">
+      <div class="sp-empty">에이전트를 클릭하여<br>상태를 확인하세요</div>
+    </div>
   </div>
 </div>
 
-<!-- Command Bar -->
-<div class="cmd-bar" id="cmd-bar">
-  <div class="cmd-sent" id="cmd-sent">
-    <span class="cmd-sent-msg" id="cmd-sent-msg"></span>
-    <span class="cmd-sent-status" id="cmd-sent-status"><span class="dot-pulse"></span> 처리 중...</span>
+<!-- Bottom: command bar -->
+<div class="bottom-bar" id="bottom-bar" style="display:none">
+  <div class="cmd-bar" id="cmd-bar">
+    <div class="cmd-normal" id="cmd-normal">
+      <input class="cmd-input" id="cmd-input" placeholder="@에이전트 지시사항 입력..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}">
+      <button class="cmd-send" id="cmd-send-btn" onclick="send()">⏎</button>
+    </div>
+    <div class="cmd-approval" id="cmd-approval" style="display:none">
+      <button class="apr-nav" onclick="aprNav(-1)" title="이전">◀</button>
+      <span class="apr-info" id="apr-info"></span>
+      <input class="apr-comment" id="apr-comment" placeholder="코멘트 (선택)" onkeydown="if(event.key==='Enter'){event.preventDefault();aprResolve('approved')}">
+      <button class="apr-btn apr-yes" onclick="aprResolve('approved')">✅ 승인</button>
+      <button class="apr-btn apr-no" onclick="aprResolve('rejected')">❌ 반려</button>
+      <button class="apr-nav" onclick="aprNav(1)" title="다음">▶</button>
+      <button class="apr-skip" onclick="aprSkip()" title="나중에">✕</button>
+    </div>
   </div>
-  <div class="cmd-chips" id="cmd-chips"></div>
-  <input class="cmd-input" id="cmd-input" placeholder="@에이전트 지시사항 입력..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}">
-  <button class="cmd-send" id="cmd-send-btn" onclick="send()">⏎</button>
 </div>
 
 <!-- Side drawer toggle buttons -->
@@ -345,7 +288,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   <button onclick="toggleDrawer('approvals')" id="dt-approvals" title="결재" style="position:relative">🔔<span class="badge" id="apr-badge" style="display:none">0</span></button>
   <button onclick="toggleDrawer('plan')" id="dt-plan" title="계획">🗂️</button>
   <button onclick="toggleDrawer('files')" id="dt-files" title="자료">📂</button>
-
 </div>
 
 <!-- Side drawer -->
@@ -459,35 +401,28 @@ function updateNotifBtn(){
 function notify(title,body){
   if(!notifEnabled||!document.hidden)return;
   if(!('Notification' in window)||Notification.permission!=='granted')return;
-  try{
-    const n=new Notification(title,{body,icon:'🏢'});
-    n.onclick=()=>{window.focus();n.close()};
-    setTimeout(()=>n.close(),5000);
-  }catch(e){}
+  try{const n=new Notification(title,{body,icon:'🏢'});n.onclick=()=>{window.focus();n.close()};setTimeout(()=>n.close(),5000)}catch(e){}
 }
 
 // ─── State ───
 let cos=[],cur=null,lastLen=0,approvals=[],tasks=[],costs=null;
+let selectedAgent=null; // currently selected agent ID for status panel
 const thinking={};
-// Per-agent speech log: { agentId: [{type,html,time},...] }
 const agentLog={};
 
 // ─── Core ───
 async function load(){
   try{cos=(await(await fetch('/api/companies')).json())}catch(e){cos=[]}
   renderTabs();
-  if(!cos.length){$('empty').style.display='block';$('fog-map').style.display='none';$('cmd-bar').classList.remove('show');$('drawer-btns').style.display='none'}
-  else{$('empty').style.display='none';$('fog-map').style.display='block';$('cmd-bar').classList.add('show');$('drawer-btns').style.display='';if(!cur||!cos.find(c=>c.id===cur))sel(cos[0].id);else refresh()}
+  if(!cos.length){$('empty').style.display='block';$('dashboard').style.display='none';$('bottom-bar').style.display='none';$('drawer-btns').style.display='none'}
+  else{$('empty').style.display='none';$('dashboard').style.display='flex';$('bottom-bar').style.display='flex';$('drawer-btns').style.display='';if(!cur||!cos.find(c=>c.id===cur))sel(cos[0].id);else refresh()}
 }
 function renderTabs(){$('tabs').innerHTML=cos.map(c=>`<div class="tab ${c.id===cur?'active':''}" onclick="sel('${c.id}')">${_e(c.name)}<span class="x" onclick="event.stopPropagation();delCo('${c.id}','${_e(c.name)}')">✕</span></div>`).join('')}
-async function sel(id){cur=id;lastLen=0;Object.keys(agentLog).forEach(k=>delete agentLog[k]);renderTabs();await refresh()}
+async function sel(id){cur=id;lastLen=0;selectedAgent=null;Object.keys(agentLog).forEach(k=>delete agentLog[k]);renderTabs();await refresh()}
 
 async function refresh(){
   if(!cur)return;
   const c=await(await fetch(`/api/company/${cur}`)).json();
-  // Build agent chips
-  $('cmd-chips').innerHTML=(c.agents||[]).map(a=>`<span class="cmd-chip" onclick="ins('${a.name}')">${a.emoji} @${a.name}</span>`).join('');
-  // Populate agent logs from chat history
   (c.chat||[]).forEach(m=>{
     if(m.type==='agent'&&m.from){
       const ag=(c.agents||[]).find(a=>a.name===m.from);
@@ -495,363 +430,172 @@ async function refresh(){
     }
   });
   lastLen=(c.chat||[]).length;
-  renderFogMap();extras();
+  renderIconGrid();renderStatusPanel();extras();
 }
 
 function pushSpeech(aid,text,name,emoji,time){
   if(!agentLog[aid])agentLog[aid]=[];
-  // Dedupe by text prefix
   const last=agentLog[aid][agentLog[aid].length-1];
   if(last&&last.raw===text)return;
-  // Parse mentions/delegations
   const mentions=(text.match(/@(\w+)/g)||[]).map(t=>t.slice(1));
-  const hasDelegate=mentions.length>0;
-  agentLog[aid].push({raw:text,mentions,hasDelegate,time:time||now(),name,emoji});
-  if(agentLog[aid].length>8)agentLog[aid].shift();
+  agentLog[aid].push({raw:text,mentions,time:time||now(),name,emoji});
+  if(agentLog[aid].length>10)agentLog[aid].shift();
 }
 function now(){return new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}
 
 async function extras(){
   if(!cur)return;
-  try{const[b,c,a,n]=await Promise.all([fetch(`/api/board-tasks/${cur}`),fetch(`/api/costs/${cur}`),fetch(`/api/approvals/${cur}?status=pending`),fetch(`/api/narrative/${cur}`)]);
-    tasks=await b.json();costs=await c.json();approvals=await a.json();const nd=await n.json();renderBanner();renderStats();updateAprBadge();renderNarrative(nd.events||[])}catch(e){}
+  try{const[b,c,a]=await Promise.all([fetch(`/api/board-tasks/${cur}`),fetch(`/api/costs/${cur}`),fetch(`/api/approvals/${cur}?status=pending`)]);
+    tasks=await b.json();costs=await c.json();approvals=await a.json();
+    renderBanner();renderStats();updateAprBadge();renderTaskList();renderStatusPanel()}catch(e){}
 }
 
-// ─── Event Narrative ───
-let narrativeOpen=true;
-function toggleNarrative(){
-  const p=$('narrative-panel');
-  if(p)p.classList.toggle('open');
-  narrativeOpen=p&&p.classList.contains('open');
+// ─── Agent Icon Grid ───
+function getAgentStatus(a){
+  const aid=a.id;
+  const isThinking=!!thinking[cur+':'+aid];
+  if(isThinking)return'thinking';
+  if(a.status==='working')return'working';
+  if(a.status==='registering')return'registering';
+  if(a.status==='active')return'active';
+  return'idle';
 }
-function renderNarrative(events){
-  const panel=$('narrative-panel');
-  if(!panel)return;
-  if(!cur)return;
-  panel.style.display='block';
-  if(narrativeOpen)panel.classList.add('open');
-  const body=$('narrative-body');
-  const cnt=$('narrative-count');
-  if(cnt)cnt.textContent=events.length?`(${events.length}건)`:'';
-  if(!events.length){
-    body.innerHTML='<div class="narrative-empty">아직 사건이 없습니다</div>';
-    return;
-  }
-  body.innerHTML=events.map(ev=>{
-    const cls=ev.type||'';
-    return`<div class="narrative-event ${cls}"><span class="ne-icon">${ev.icon||'•'}</span><span class="ne-text">${_e(ev.text)}</span><span class="ne-time">${ev.time||''}</span></div>`;
+
+function renderIconGrid(){
+  const el=$('icon-grid');if(!el)return;
+  const c=cos.find(x=>x.id===cur);
+  if(!c||!c.agents){el.innerHTML='<div style="color:var(--dim);font-size:11px;padding:20px">에이전트 없음</div>';return}
+  el.innerHTML=c.agents.map(a=>{
+    const st=getAgentStatus(a);
+    const sel=selectedAgent===a.id?'selected':'';
+    return`<div class="agent-icon s-${st} ${sel}" onclick="selectAgent('${a.id}')">
+      <div class="ai-circle">${a.emoji||'🤖'}<span class="ai-dot"></span></div>
+      <span class="ai-name">${_e(a.name)}</span>
+    </div>`;
   }).join('');
 }
 
-// ─── Map Zoom ───
-let _mapScale=1;
-function mapZoom(dir){
-  if(dir===0)_mapScale=1;
-  else _mapScale=Math.max(.4,Math.min(2,_mapScale+dir*.15));
-  const grid=$('map-grid');if(grid)grid.style.transform=`scale(${_mapScale})`;
-  const lbl=$('zoom-level');if(lbl)lbl.textContent=Math.round(_mapScale*100)+'%';
-}
-// Ctrl+scroll zoom on the map
-document.addEventListener('DOMContentLoaded',()=>{
-  const fm=$('fog-map');if(!fm)return;
-  fm.addEventListener('wheel',e=>{
-    if(!e.ctrlKey)return;
-    e.preventDefault();
-    mapZoom(e.deltaY<0?1:-1);
-  },{passive:false});
-});
-
-// ─── Fog of War Map ───
-const CAT_KEYWORDS={
-  dev:['코딩','개발','API','서버','프론트','백엔드','DB','배포','frontend','backend','deploy','server','database','coding','api'],
-  plan:['기획','전략','분석','리서치','조사','계획','planning','strategy','research','analysis'],
-  market:['마케팅','홍보','SNS','광고','SEO','콘텐츠','브랜딩','marketing','branding','content','ads','seo'],
-  design:['디자인','UI','UX','시안','로고','이미지','스프라이트','design','logo','image','wireframe','mockup']
-};
-const CAT_META={
-  dev:{label:'개발',cls:'q-dev',tint:'rgba(59,130,246,0.1)'},
-  plan:{label:'기획',cls:'q-plan',tint:'rgba(139,92,246,0.1)'},
-  market:{label:'마케팅',cls:'q-market',tint:'rgba(34,197,94,0.1)'},
-  design:{label:'디자인',cls:'q-design',tint:'rgba(236,72,153,0.1)'}
-};
-function detectCategory(title){
-  if(!title)return'plan';
-  const t=title.toLowerCase();
-  for(const[cat,kws]of Object.entries(CAT_KEYWORDS)){
-    if(kws.some(k=>t.includes(k.toLowerCase())))return cat;
+function selectAgent(aid){
+  selectedAgent=selectedAgent===aid?null:aid;
+  renderIconGrid();
+  renderStatusPanel();
+  // Auto-fill command bar
+  if(selectedAgent){
+    const c=cos.find(x=>x.id===cur);
+    const a=c?(c.agents||[]).find(x=>x.id===aid):null;
+    if(a){const inp=$('cmd-input');if(inp&&!inp.value)inp.value='@'+a.name+' ';inp.focus()}
   }
-  return'plan';
 }
 
-// Quadrant placement: each quadrant fills from center outward
-// Grid layout: center is HQ, quadrants spiral outward
-function buildGridPositions(counts){
-  // We'll use a coordinate system where (0,0) is HQ
-  // plan=top-left(-x,+y), dev=top-right(+x,+y), market=bottom-left(-x,-y), design=bottom-right(+x,-y)
-  const positions={plan:[],dev:[],market:[],design:[]};
-  const quadrantOffsets={
-    plan:{dx:-1,dy:-1},  // top-left in grid (row<center, col<center)
-    dev:{dx:1,dy:-1},    // top-right
-    market:{dx:-1,dy:1}, // bottom-left
-    design:{dx:1,dy:1}   // bottom-right
-  };
-  for(const[cat,off]of Object.entries(quadrantOffsets)){
-    const need=counts[cat]||0;
-    let placed=0;
-    // Spiral outward from center in the quadrant direction
-    for(let ring=1;ring<=8&&placed<need;ring++){
-      for(let i=0;i<ring&&placed<need;i++){
-        for(let j=0;j<ring&&placed<need;j++){
-          const r=off.dy<0?-ring+j:-1+ring-j;
-          const c=off.dx<0?-ring+i:-1+ring-i;
-          // Check not already used
-          const key=r+','+c;
-          const used=Object.values(positions).flat().some(p=>p.r===r&&p.c===c);
-          if(!used){positions[cat].push({r,c});placed++}
-        }
-      }
-    }
+// ─── Status Panel (Character Sheet) ───
+function renderStatusPanel(){
+  const panel=$('status-panel');if(!panel)return;
+  if(!selectedAgent){
+    panel.innerHTML='<div class="sp-empty">에이전트를 클릭하여<br>상태를 확인하세요</div>';
+    return;
   }
-  return positions;
-}
-
-function renderFogMap(){
-  const grid=$('map-grid');if(!grid)return;
   const c=cos.find(x=>x.id===cur);
-  if(!c){grid.innerHTML='';return}
+  const a=c?(c.agents||[]).find(x=>x.id===selectedAgent):null;
+  if(!a){panel.innerHTML='<div class="sp-empty">에이전트를 찾을 수 없습니다</div>';return}
 
-  // Collect all task-blocks from kanban tasks
-  const blockData=[];
+  const st=getAgentStatus(a);
+  const stLabel={thinking:'생각중',working:'작업중',active:'대기',idle:'비활성',registering:'등록중'}[st]||'알수없음';
+  const stCls={thinking:'sb-thinking',working:'sb-working',active:'sb-active',idle:'sb-idle',registering:'sb-registering'}[st]||'sb-idle';
+
+  // Agent tasks
+  const agentTasks=(tasks||[]).filter(t=>t.agent_id===a.id);
+  const activeTasks=agentTasks.filter(t=>t.status==='진행중');
+  const doneTasks=agentTasks.filter(t=>t.status==='완료');
+
+  // Activity log
+  const logs=agentLog[a.id]||[];
+  const recentLogs=logs.slice(-5).reverse();
+
+  let h=`
+    <div class="sp-header">
+      <div class="sp-avatar">${a.emoji||'🤖'}</div>
+      <div>
+        <div class="sp-name">${_e(a.name)}</div>
+        <div class="sp-role">${_e(a.role||'')}</div>
+        <span class="sp-badge ${stCls}"><span class="dot"></span>${stLabel}</span>
+      </div>
+    </div>
+
+    <div class="sp-section">
+      <div class="sp-label">현재 작업</div>
+      ${activeTasks.length?activeTasks.map(t=>`
+        <div class="sp-task"><div class="sp-task-title">🔄 ${_e(t.title)}</div><div class="sp-task-status">${_e(t.status)}</div></div>
+      `).join(''):'<div class="sp-no-task">진행 중인 작업 없음</div>'}
+    </div>
+
+    <div class="sp-section">
+      <div class="sp-label">완료한 작업 <span style="color:var(--green)">${doneTasks.length}</span></div>
+      ${doneTasks.slice(-3).reverse().map(t=>`
+        <div class="sp-task done" style="margin-bottom:4px;cursor:pointer" onclick="showTaskDetail('${t.id}')"><div class="sp-task-title">✅ ${_e(t.title)}</div></div>
+      `).join('')||'<div class="sp-no-task">아직 없음</div>'}
+    </div>
+
+    <div class="sp-section">
+      <div class="sp-label">최근 활동</div>
+      ${recentLogs.length?recentLogs.map(l=>`
+        <div style="margin-bottom:6px">
+          <div class="sp-act-time">${l.time}</div>
+          <div class="sp-activity">${_e(l.raw.replace(/\n/g,' ').substring(0,150))}</div>
+        </div>
+      `).join(''):'<div class="sp-no-task">아직 활동 없음</div>'}
+    </div>
+
+    <button class="sp-msg-btn" onclick="directMsg('${a.name}')">💬 ${_e(a.name)}에게 지시</button>
+  `;
+  panel.innerHTML=h;
+}
+
+// ─── Task List ───
+function renderTaskList(){
+  const el=$('task-list');if(!el)return;
+  $('task-count').textContent=(tasks||[]).length;
+  if(!tasks||!tasks.length){el.innerHTML='<div style="color:var(--dim);font-size:10px;padding:8px">작업 없음</div>';return}
+  const c=cos.find(x=>x.id===cur);
   const agentMap={};
-  (c.agents||[]).forEach(a=>{agentMap[a.id]=a;agentMap[a.name]=a});
-
-  // Pending approvals set
-  const pendingApprovalTasks=new Set();
-  (approvals||[]).filter(a=>a.status==='pending').forEach(a=>{
-    if(a.task_id)pendingApprovalTasks.add(a.task_id);
-    if(a.title)pendingApprovalTasks.add(a.title);
-  });
-
-  (tasks||[]).forEach(t=>{
-    const cat=detectCategory(t.title);
-    let state='hazy';
-    if(t.status==='완료')state='done';
-    else if(t.status==='진행중'){
-      // Check if this agent is actively thinking right now
-      state=agent&&thinking[cur+':'+agent.id]?'thinking':'working';
-    }
-    else state='hazy';
-    // Check if blocked by approval
-    if(pendingApprovalTasks.has(t.id)||pendingApprovalTasks.has(t.title))state='blocked';
-    // Check if agent is thinking
-    const agent=agentMap[t.agent_id]||null;
-    if(agent&&thinking[cur+':'+agent.id]&&state==='working')state='working';
-    blockData.push({id:t.id,title:t.title,cat,state,agent,task:t});
-  });
-
-  // Count per category
-  const counts={dev:0,plan:0,market:0,design:0};
-  blockData.forEach(b=>counts[b.cat]++);
-
-  // Ensure minimum fog blocks per quadrant
-  const minPerQuad=3;
-  const fogBlocks=[];
-  for(const cat of['dev','plan','market','design']){
-    const need=Math.max(minPerQuad,counts[cat]+2)-counts[cat];
-    for(let i=0;i<need;i++)fogBlocks.push({id:'fog-'+cat+'-'+i,title:'',cat,state:'fog',agent:null,task:null});
-    counts[cat]+=need;
-  }
-
-  const allBlocks=[...blockData,...fogBlocks];
-  const positions=buildGridPositions(counts);
-
-  // Assign positions
-  const placed=[];
-  const catIndex={dev:0,plan:0,market:0,design:0};
-  // Place real blocks first, then fog
-  blockData.forEach(b=>{
-    const idx=catIndex[b.cat]++;
-    const pos=(positions[b.cat]||[])[idx]||{r:0,c:0};
-    placed.push({...b,row:pos.r,col:pos.c});
-  });
-  fogBlocks.forEach(b=>{
-    const idx=catIndex[b.cat]++;
-    const pos=(positions[b.cat]||[])[idx]||{r:0,c:0};
-    placed.push({...b,row:pos.r,col:pos.c});
-  });
-
-  // Find grid bounds
-  let minR=0,maxR=0,minC=0,maxC=0;
-  placed.forEach(b=>{
-    if(b.row<minR)minR=b.row;if(b.row>maxR)maxR=b.row;
-    if(b.col<minC)minC=b.col;if(b.col>maxC)maxC=b.col;
-  });
-  // Include center (0,0) for HQ
-  if(minR>0)minR=0;if(maxR<0)maxR=0;if(minC>0)minC=0;if(maxC<0)maxC=0;
-  // Add padding
-  minR--;maxR++;minC--;maxC++;
-
-  const rows=maxR-minR+1;
-  const cols=maxC-minC+1;
-
-  grid.style.gridTemplateColumns=`repeat(${cols},120px)`;
-  grid.style.gridTemplateRows=`repeat(${rows},90px)`;
-  grid.style.width=(cols*126)+'px';
-
-  // Build lookup
-  const lookup={};
-  placed.forEach(b=>{lookup[b.row+','+b.col]=b});
-
-  let html='';
-  for(let r=minR;r<=maxR;r++){
-    for(let c=minC;c<=maxC;c++){
-      const gridR=r-minR+1;
-      const gridC=c-minC+1;
-      if(r===0&&c===0){
-        // HQ block
-        const company=cos.find(x=>x.id===cur);
-        html+=`<div class="map-block hq" style="grid-row:${gridR};grid-column:${gridC}">
-          <span class="block-icon">🏢</span>
-          <span class="block-title">${_e(company?company.name:'AI Company')}</span>
-          <span class="block-sub">${(company?.agents||[]).length}명의 에이전트</span>
-        </div>`;
-        continue;
-      }
-      const block=lookup[r+','+c];
-      if(block){
-        html+=renderMapBlock(block,gridR,gridC);
-      }else{
-        // Empty fog cell
-        html+=`<div class="map-block fog" style="grid-row:${gridR};grid-column:${gridC}"></div>`;
-      }
-    }
-  }
-  grid.innerHTML=html;
+  (c?.agents||[]).forEach(a=>{agentMap[a.id]=a});
+  const order={'진행중':0,'대기':1,'완료':2};
+  const sorted=[...tasks].sort((a,b)=>(order[a.status]??1)-(order[b.status]??1));
+  el.innerHTML=sorted.map(t=>{
+    const icon=t.status==='완료'?'✅':t.status==='진행중'?'🔄':'⬜';
+    const cls=t.status==='완료'?'tr-done':'';
+    const agent=agentMap[t.agent_id];
+    const agentLabel=agent?`${agent.emoji||''} ${agent.name}`:'';
+    const blocked=(approvals||[]).some(a=>a.status==='pending'&&(a.task_id===t.id||a.title===t.title));
+    const stColor=blocked?'background:#7f1d1d;color:#fca5a5':t.status==='진행중'?'background:rgba(59,130,246,.2);color:#60a5fa':t.status==='완료'?'background:rgba(0,255,136,.1);color:#00ff88':'background:var(--card);color:var(--dim)';
+    return`<div class="task-row ${cls}" onclick="showTaskDetail('${t.id}')">
+      <span class="tr-icon">${blocked?'⚠️':icon}</span>
+      <span class="tr-title">${_e(t.title)}</span>
+      <span class="tr-agent">${_e(agentLabel)}</span>
+      <span class="tr-status" style="${stColor}">${blocked?'차단':_e(t.status||'대기')}</span>
+    </div>`;
+  }).join('');
 }
 
-function renderMapBlock(b,gridR,gridC){
-  const catCls=CAT_META[b.cat]?CAT_META[b.cat].cls:'';
-  const stateCls=b.state;
-  const agentIcon=b.agent?`<span class="block-agent">${b.agent.emoji||'🤖'}</span>`:'';
-  const stateIcon=b.state==='done'?'✨':b.state==='thinking'?'⚡':b.state==='working'?'🔄':b.state==='blocked'?'⚠️':b.state==='hazy'?'◻️':'🌫️';
-
-  let inner='';
-  if(b.state==='fog'){
-    inner=`<span class="block-icon" style="opacity:.3">🌫️</span>`;
-  }else{
-    const titleText=_e((b.title||'').substring(0,14));
-    inner=`<span class="block-icon">${stateIcon}</span>`;
-    inner+=`<span class="block-title">${titleText}</span>`;
-    if(b.agent){
-      inner+=`<span class="block-sub">${b.agent.emoji||'🤖'} ${_e(b.agent.name||'')}</span>`;
-    }
-    if(b.state==='done'){
-      inner+=`<span class="block-result" onclick="event.stopPropagation();showBlockDetail('${b.id}')">📄 결과보기</span>`;
-    }
-    if(b.state==='working'||b.state==='thinking'){
-      // Show last speech snippet + progress
-      const logs=b.agent?agentLog[b.agent.id]:null;
-      const lastMsg=logs&&logs.length?logs[logs.length-1].raw:'';
-      if(lastMsg){
-        const snippet=_e(lastMsg.replace(/^##\s*/gm,'').replace(/\n/g,' ').substring(0,25));
-        inner+=`<span class="block-speech">💬 ${snippet}...</span>`;
-      }
-      if(b.state==='thinking'){
-        inner+=`<div class="block-progress"><div class="block-progress-fill" style="width:100%;background:linear-gradient(90deg,#fbbf24,#f59e0b);animation:progressPulse 1s ease-in-out infinite"></div></div>`;
-      }else{
-        inner+=`<div class="block-progress"><div class="block-progress-fill" style="width:70%;background:linear-gradient(90deg,#3b82f6,#60a5fa)"></div></div>`;
-      }
-    }
-    // Tooltip
-    const logs=b.agent?agentLog[b.agent.id]:null;
-    const lastSpeech=logs&&logs.length?_e(logs[logs.length-1].raw.substring(0,60)):'';
-    const tooltipText=b.agent?`${b.agent.emoji} ${b.agent.name} · ${_e(b.title||'')}${lastSpeech?' · '+lastSpeech:''}`:_e(b.title||'');
-    inner+=`<div class="block-tooltip">${tooltipText}</div>`;
-  }
-  inner+=agentIcon;
-
-  const clickHandler=b.state==='done'?`onclick="showBlockDetail('${b.id}')"`
-    :b.state==='working'||b.state==='thinking'?`onclick="showBlockSpeech('${b.agent?b.agent.id:''}')"`
-    :b.state==='blocked'?`onclick="showBlockDetail('${b.id}')"`:'';
-
-  return`<div class="map-block ${stateCls} ${catCls}" style="grid-row:${gridR};grid-column:${gridC}" ${clickHandler}>${inner}</div>`;
-}
-
-function showBlockDetail(taskId){
-  // Close any existing popup
-  document.querySelectorAll('.block-popup').forEach(el=>el.remove());
-  const t=(tasks||[]).find(x=>x.id===taskId);
-  if(!t)return;
+function showTaskDetail(taskId){
+  document.querySelectorAll('.detail-popup').forEach(el=>el.remove());
+  const t=(tasks||[]).find(x=>x.id===taskId);if(!t)return;
   const agent=t.agent_id?((cos.find(x=>x.id===cur)?.agents||[]).find(a=>a.id===t.agent_id)):null;
-  const statusColor=t.status==='완료'?'background:#064e3b;color:#6ee7b7':t.status==='진행중'?'background:#1c1917;color:#fbbf24':'background:#1e293b;color:var(--dim)';
   const popup=document.createElement('div');
-  popup.className='block-popup';
+  popup.className='detail-popup';
   popup.innerHTML=`
-    <button class="bp-close" onclick="this.parentElement.remove()">✕</button>
-    <h4>${t.status==='완료'?'✨':'🔄'} ${_e(t.title)}</h4>
-    <span class="bp-status" style="${statusColor}">${_e(t.status||'대기')}</span>
-    ${agent?`<div class="bp-agent">${agent.emoji||'🤖'} ${_e(agent.name)} · ${_e(agent.role||'')}</div>`:''}
-    <div class="bp-content">${_e(t.result||t.detail||t.description||'결과 없음')}</div>
+    <button class="dp-close" onclick="this.parentElement.remove()">✕</button>
+    <h4>${t.status==='완료'?'✅':'🔄'} ${_e(t.title)}</h4>
+    ${agent?`<div style="font-size:10px;color:#a5b4fc;margin-bottom:6px">${agent.emoji||'🤖'} ${_e(agent.name)} · ${_e(agent.role||'')}</div>`:''}
+    <div style="display:inline-block;padding:2px 8px;border-radius:8px;font-size:9px;font-weight:600;margin-bottom:8px;${t.status==='완료'?'background:#064e3b;color:#6ee7b7':t.status==='진행중'?'background:#1c1917;color:#fbbf24':'background:#1e293b;color:var(--dim)'}">${_e(t.status||'대기')}</div>
+    <div class="dp-content">${_e(t.result||t.detail||t.description||'결과 없음')}</div>
   `;
-  // Position near center
-  popup.style.top='50%';popup.style.left='50%';popup.style.transform='translate(-50%,-50%)';
-  document.body.appendChild(popup);
-  // Close on click outside
-  const closer=e=>{if(!popup.contains(e.target)){popup.remove();document.removeEventListener('click',closer)}};
-  setTimeout(()=>document.addEventListener('click',closer),100);
-}
-
-function showBlockSpeech(agentId){
-  if(!agentId)return;
-  const logs=agentLog[agentId]||[];
-  if(!logs.length){toast('아직 활동 없음');return}
-  const last=logs[logs.length-1];
-  // Show as popup
-  document.querySelectorAll('.block-popup').forEach(el=>el.remove());
-  const popup=document.createElement('div');
-  popup.className='block-popup';
-  popup.innerHTML=`
-    <button class="bp-close" onclick="this.parentElement.remove()">✕</button>
-    <h4>${last.emoji||'🤖'} ${_e(last.name||agentId)}</h4>
-    <div class="bp-content">${fmtBubble(last.raw.substring(0,500))}</div>
-    <div style="margin-top:8px;font-size:8px;color:var(--dim)">${last.time||''}</div>
-  `;
-  popup.style.top='50%';popup.style.left='50%';popup.style.transform='translate(-50%,-50%)';
   document.body.appendChild(popup);
   const closer=e=>{if(!popup.contains(e.target)){popup.remove();document.removeEventListener('click',closer)}};
   setTimeout(()=>document.addEventListener('click',closer),100);
-}
-
-function fmtBubble(text){
-  let h=_e(text);
-  h=h.replace(/^## (.+)$/gm,'<div style="font-size:12px;font-weight:700;color:#f1f5f9;margin:4px 0 2px">$1</div>');
-  h=h.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
-  h=h.replace(/`([^`]+)`/g,'<code>$1</code>');
-  h=h.replace(/@(\w+)/g,'<span class="at">@$1</span>');
-  h=h.replace(/^- (.+)$/gm,'<div style="padding-left:8px">• $1</div>');
-  h=h.replace(/\n/g,'<br>');
-  return h;
-}
-
-function expandCard(aid){
-  const logs=agentLog[aid]||[];
-  if(!logs.length){toast('아직 활동 없음');return}
-  openDrawerWith('log','📋 '+aid.toUpperCase()+' 전체 로그',
-    logs.map(l=>`<div style="padding:6px 0;border-bottom:1px solid #1e293b;font-size:11px;line-height:1.5">
-      <div style="color:var(--dim);font-size:9px;margin-bottom:2px">${l.time}</div>
-      ${fmtBubble(l.raw)}
-    </div>`).join('')
-  );
-}
-
-function directMsg(name){
-  const i=$('cmd-input');
-  i.value='@'+name+' ';
-  i.focus();
 }
 
 // ─── Command Bar ───
-function ins(n){const i=$('cmd-input');i.value+='@'+n+' ';i.focus()}
+function directMsg(name){const i=$('cmd-input');i.value='@'+name+' ';i.focus()}
 function _setCmdBarLock(locked,msg){
   const inp=$('cmd-input'),btn=$('cmd-send-btn');
   if(locked){
@@ -865,45 +609,59 @@ function _setCmdBarLock(locked,msg){
 async function send(){
   const i=$('cmd-input'),t=i.value.trim();if(!t||!cur)return;
   i.value='';
-  // Show sent confirmation
-  const sentEl=$('cmd-sent'),msgEl=$('cmd-sent-msg'),statusEl=$('cmd-sent-status'),btn=$('cmd-send-btn');
-  const target=(t.match(/@(\w+)/)||[])[1]||'';
-  const preview=t.length>40?t.substring(0,40)+'...':t;
-  if(msgEl)msgEl.textContent=`📤 "${preview}"`;
-  if(statusEl)statusEl.innerHTML='<span class="dot-pulse"></span> '+(target?`${target.toUpperCase()} 전달 중...`:'전송 중...');
-  if(sentEl)sentEl.classList.add('visible');
-  if(btn){btn.textContent='✓';btn.style.background='#065f46';setTimeout(()=>{btn.textContent='⏎';btn.style.background=''},800)}
-  // Flash command bar border
-  const bar=$('cmd-bar');if(bar){bar.style.borderColor='var(--accent)';setTimeout(()=>bar.style.borderColor='',600)}
-  try{
-    const r=await fetch(`/api/chat/${cur}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});
-    const d=await r.json();
-    if(d.target&&statusEl)statusEl.innerHTML='<span class="dot-pulse"></span> '+d.target+' 작업 중...';
-  }catch(e){
-    if(statusEl)statusEl.innerHTML='<span style="color:var(--red)">❌ 전송 실패</span>';
-  }
-  // Auto-hide after agent responds (SSE will clear it)
-  _sentTimeout=setTimeout(()=>{if(sentEl)sentEl.classList.remove('visible')},120000);
-}
-let _sentTimeout=null;
-function clearSentStatus(){
-  const el=$('cmd-sent');if(el)el.classList.remove('visible');
-  if(_sentTimeout){clearTimeout(_sentTimeout);_sentTimeout=null}
+  try{await fetch(`/api/chat/${cur}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});
+    toast('📤 전송됨')}catch(e){toast('❌ 전송 실패')}
 }
 
 // ─── Approvals ───
+let _aprIdx=0,_aprSkipped=false;
 function renderBanner(){
-  const b=$('banner'),pend=approvals.filter(a=>a.status==='pending'&&(a.detail||a.title));
-  if(!pend.length){b.classList.remove('show');return}
-  b.classList.add('show');const f=pend[0];
-  b.innerHTML=`<span>📋</span><span style="flex:1"><strong>${_e(f.title||'기안')}</strong>${pend.length>1?' +'+(pend.length-1)+'건':''} · ${_e(f.from_agent||'')} · ${_e((f.detail||'').substring(0,50))}</span><button onclick="resolve('${f.id}','approved')">✅ 승인</button><button onclick="resolve('${f.id}','rejected')">❌ 반려</button>`;
+  const pend=approvals.filter(a=>a.status==='pending'&&(a.detail||a.title));
+  const normalEl=$('cmd-normal'),aprEl=$('cmd-approval'),infoEl=$('apr-info'),commentEl=$('apr-comment');
+  if(!pend.length||_aprSkipped){
+    if(normalEl)normalEl.style.display='flex';
+    if(aprEl)aprEl.style.display='none';
+    return;
+  }
+  if(normalEl)normalEl.style.display='none';
+  if(aprEl)aprEl.style.display='flex';
+  _aprIdx=Math.max(0,Math.min(_aprIdx,pend.length-1));
+  const a=pend[_aprIdx];
+  if(infoEl)infoEl.innerHTML=`📋 ${_e((a.title||a.detail||'기안').substring(0,40))}<span class="apr-from">${_e(a.from_agent||'')} · ${pend.length>1?(_aprIdx+1)+'/'+pend.length:''}</span>`;
+  if(commentEl)commentEl.value='';
 }
-async function resolve(id,res){
-  try{await fetch(`/api/approval-${res==='rejected'?'reject':'approve'}/${cur}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:id,response:'',resolution:res})});
-    toast(res==='approved'?'✅ 승인':'❌ 반려');approvals=approvals.filter(a=>a.id!==id);renderBanner();updateAprBadge();renderFogMap()}catch(e){toast('실패')}
+function aprNav(dir){
+  const pend=approvals.filter(a=>a.status==='pending'&&(a.detail||a.title));
+  _aprIdx=(_aprIdx+dir+pend.length)%pend.length;
+  renderBanner();
+}
+function aprSkip(){
+  _aprSkipped=true;renderBanner();
+  setTimeout(()=>{_aprSkipped=false;renderBanner()},30000);
+}
+async function aprResolve(res){
+  const pend=approvals.filter(a=>a.status==='pending'&&(a.detail||a.title));
+  if(!pend.length)return;
+  const a=pend[_aprIdx];
+  const comment=($('apr-comment')?.value||'').trim();
+  try{
+    const r=await fetch(`/api/approval-${res==='rejected'?'reject':'approve'}/${cur}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approval_id:a.id,response:comment,resolution:res})});
+    const d=await r.json();
+    if(d.error){toast('❌ '+d.error);return}
+    toast(res==='approved'?'✅ 승인 완료':'❌ 반려 완료');
+    approvals=approvals.filter(x=>x.id!==a.id);
+    _aprIdx=0;
+    renderBanner();
+    fetch(`/api/approvals/${cur}?status=pending`).then(r=>r.json()).then(d=>{approvals=d;renderBanner();updateAprBadge()}).catch(()=>{});
+  }catch(e){toast('❌ 오류: '+e.message)}
+}
+function resolve(id,res,comment){
+  const idx=approvals.findIndex(a=>a.id===id);
+  if(idx>=0){_aprIdx=idx;$('apr-comment').value=comment||'';aprResolve(res)}
 }
 function updateAprBadge(){
-  const b=$('apr-badge'),cnt=approvals.filter(a=>a.status==='pending').length;
+  const b=$('apr-badge');if(!b)return;
+  const cnt=approvals.filter(a=>a.status==='pending').length;
   if(cnt>0){b.style.display='flex';b.textContent=cnt}else{b.style.display='none'}
 }
 function renderStats(){
@@ -949,9 +707,10 @@ function renderDrawerApprovals(el){
     <div style="font-size:11px;font-weight:600;color:var(--text)">${_e(a.title||a.approval_type||'기안')}</div>
     <div style="font-size:9px;color:var(--dim);margin:2px 0">${_e(a.from_agent||'')} · ${a.time||''}</div>
     <div style="font-size:10px;color:var(--text);white-space:pre-wrap;max-height:80px;overflow-y:auto;margin:4px 0">${_e((a.detail||'').substring(0,300))}</div>
-    <div style="display:flex;gap:4px;margin-top:4px">
-      <button onclick="resolve('${a.id}','approved')" style="background:#064e3b;color:#6ee7b7">✅ 승인</button>
-      <button onclick="resolve('${a.id}','rejected')" style="background:#7f1d1d;color:#fca5a5">❌ 반려</button>
+    <input id="apr-comment-${a.id}" placeholder="코멘트 (선택)" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:5px 8px;color:var(--text);font-size:10px;outline:none;margin:4px 0;box-sizing:border-box">
+    <div style="display:flex;gap:4px">
+      <button onclick="resolve('${a.id}','approved',document.getElementById('apr-comment-${a.id}')?.value)" style="background:#064e3b;color:#6ee7b7">✅ 승인</button>
+      <button onclick="resolve('${a.id}','rejected',document.getElementById('apr-comment-${a.id}')?.value)" style="background:#7f1d1d;color:#fca5a5">❌ 반려</button>
     </div>
   </div>`).join('');
 }
@@ -963,13 +722,12 @@ function renderDrawerFiles(el){
       const icon=ext==='md'?'📝':ext==='png'?'🖼️':ext==='json'?'📋':'📄';
       return`<div class="file-item" onclick="window.open('/api/file/${cur}/${f.path}','_blank')"><span>${icon}</span><span style="flex:1;color:#60a5fa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_e(f.path)}</span><span style="color:var(--dim);font-size:8px">${f.modified||''}</span></div>`}).join('');
   }).catch(()=>{el.innerHTML='<div style="color:var(--dim);font-size:10px">로드 실패</div>'});
-  // Also load report
   fetch(`/api/newspaper/${cur}`).then(r=>r.json()).then(d=>{
     if(d.newspaper)el.innerHTML+=`<div style="margin-top:12px;font-size:10px;font-weight:600;color:var(--dim);margin-bottom:4px">📊 리포트</div><div style="font-size:10px;color:var(--text);white-space:pre-wrap;line-height:1.5;background:var(--card);border-radius:6px;padding:8px">${_e(d.newspaper)}</div>`;
   }).catch(()=>{});
 }
 
-// ─── Plan Tree (in drawer) ───
+// ─── Plan Tree ───
 let _planTasks=[],_planAddPar=null;
 async function fetchPlanTasks(){
   if(!cur)return;
@@ -1032,7 +790,6 @@ async function planDel(id){
 function openCreate(){$('create-modal').classList.add('show')}
 async function createCo(){
   const n=$('c-name').value.trim(),t=$('c-topic').value.trim();if(!n)return;
-  // Disable button, show progress
   const btn=document.querySelector('#create-modal .btn-primary');
   if(btn){btn.disabled=true;btn.textContent='⏳ 에이전트 생성 중...'}
   try{
@@ -1041,8 +798,7 @@ async function createCo(){
       $('create-modal').classList.remove('show');$('c-name').value='';$('c-topic').value='';
       const agentCount=(r.company.agents||[]).length;
       cur=r.company.id;load();
-      // Disable command bar while agents register
-      _setCmdBarLock(true,`⏳ ${agentCount}개 에이전트 등록 중... 잠시 기다려주세요`);
+      _setCmdBarLock(true,`⏳ ${agentCount}개 에이전트 등록 중...`);
       toast(`🏢 ${n} 생성됨 — ${agentCount}개 에이전트 등록 중...`);
       _watchAgentReady(r.company.id,agentCount);
     }else toast('❌ 생성 실패: '+(r.error||''));
@@ -1058,16 +814,15 @@ function _watchAgentReady(cid,total){
       const registering=c.agents.filter(a=>a.status==='registering');
       if(ready>=total){
         clearInterval(_interval);
-        toast(`✅ 모든 에이전트 준비 완료! 지시를 내리세요.`);
+        toast(`✅ 모든 에이전트 준비 완료!`);
         _setCmdBarLock(false);
-        renderFogMap();
+        renderIconGrid();
       }else{
         const names=registering.map(a=>a.emoji+' '+a.name).join(', ');
-        toast(`⏳ ${ready}/${total} 준비 완료 — 등록 중: ${names}`);
+        toast(`⏳ ${ready}/${total} 준비 — ${names}`);
       }
     }catch(e){clearInterval(_interval)}
   },5000);
-  // Safety: stop after 3 minutes
   setTimeout(()=>{clearInterval(_interval);_setCmdBarLock(false)},180000);
 }
 async function delCo(id,name){
@@ -1099,7 +854,7 @@ function dl(){if(cur)window.open('/api/download/'+cur)}
 // ─── Outsourcing ───
 function openOutsource(){
   if(!cur){toast('회사를 먼저 선택하세요');return}
-  if(cos.length<2){toast('아웃소싱할 다른 회사가 필요합니다. 회사를 추가하세요.');return}
+  if(cos.length<2){toast('아웃소싱할 다른 회사가 필요합니다.');return}
   const sel=$('os-company');
   sel.innerHTML=cos.filter(c=>c.id!==cur).map(c=>`<option value="${c.id}">${_e(c.name)}</option>`).join('');
   sel.onchange=()=>{
@@ -1146,19 +901,13 @@ function connectSSE(){
   es.addEventListener('init',e=>{try{cos=JSON.parse(e.data);renderTabs()}catch(e){}});
   es.addEventListener('agent_thinking',e=>{try{const d=JSON.parse(e.data);
     thinking[d.cid+':'+d.agent_id]={};
-    if(d.cid===cur)renderFogMap();
+    if(d.cid===cur){renderIconGrid();renderStatusPanel()}
   }catch(e){}});
   es.addEventListener('agent_done',e=>{try{const d=JSON.parse(e.data);
     notify('✅ 작업 완료',(d.agent_name||d.agent_id)+' 작업 완료');
     delete thinking[d.cid+':'+d.agent_id];
     if(d.cid===cur){
-      // Update sent status to show completion
-      const statusEl=$('cmd-sent-status');
-      if(statusEl&&$('cmd-sent')?.classList.contains('visible')){
-        statusEl.innerHTML='<span style="color:var(--green)">✅ '+(d.agent_name||d.agent_id).toUpperCase()+' 완료</span>';
-        setTimeout(clearSentStatus,3000);
-      }
-      renderFogMap();
+      renderIconGrid();renderStatusPanel();
       extras();
       if(curDrawer==='tasks')renderDrawerTasks($('drawer-body'));
       if(curDrawer==='plan')fetchPlanTasks();
@@ -1170,7 +919,6 @@ function connectSSE(){
     if(!d.company||!d.id)return;const i=cos.findIndex(c=>c.id===d.id);if(i>=0)cos[i]=d.company;else cos.push(d.company);renderTabs();
     if(d.id!==cur)return;
     const c=d.company,chat=c.chat||[];
-    // Process new messages
     chat.slice(lastLen).forEach(m=>{
       if(m.type==='agent'&&m.from){
         const ag=(c.agents||[]).find(a=>a.name===m.from);
@@ -1179,9 +927,7 @@ function connectSSE(){
       }
     });
     lastLen=chat.length;
-    renderFogMap();
-    // Refresh narrative on new messages
-    fetch(`/api/narrative/${cur}`).then(r=>r.json()).then(nd=>renderNarrative(nd.events||[])).catch(()=>{});
+    renderIconGrid();renderStatusPanel();
   }catch(e){}});
   es.onerror=()=>{es.close();sseTimer=setTimeout(connectSSE,3000)};
 }
