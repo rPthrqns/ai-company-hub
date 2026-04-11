@@ -818,12 +818,13 @@ function renderDrawerFiles(el){
 let _planTasks=[],_planAddPar=null,_planCollapsed=new Set(),_planUserExpanded=new Set();
 
 // Category detection (reused from old fog map logic)
+// Order matters: more specific first; 'plan' is the fallback.
 const PLAN_CAT={
-  dev:{label:'개발 Development',icon:'💻',color:'#3b82f6',kw:['코딩','개발','API','서버','프론트','백엔드','DB','배포','frontend','backend','deploy','server','database','coding','api','버그','테스트','구현']},
-  plan:{label:'기획 Planning',icon:'📊',color:'#8b5cf6',kw:['기획','전략','분석','리서치','조사','계획','planning','strategy','research','analysis','보고','정리']},
-  market:{label:'마케팅 Marketing',icon:'📢',color:'#22c55e',kw:['마케팅','홍보','SNS','광고','SEO','콘텐츠','브랜딩','marketing','branding','content','ads','seo','고객','캠페인']},
   design:{label:'디자인 Design',icon:'🎨',color:'#ec4899',kw:['디자인','UI','UX','시안','로고','이미지','design','logo','wireframe','mockup','프로토']},
+  market:{label:'마케팅 Marketing',icon:'📢',color:'#22c55e',kw:['마케팅','홍보','SNS','광고','SEO','콘텐츠','브랜딩','marketing','branding','content','ads','seo','고객','캠페인']},
+  dev:{label:'개발 Development',icon:'💻',color:'#3b82f6',kw:['코딩','개발','API','서버','프론트','백엔드','DB','배포','frontend','backend','deploy','server','database','coding','api','버그','테스트','구현']},
   ops:{label:'운영 Operations',icon:'⚙️',color:'#f59e0b',kw:['운영','인사','재무','예산','비용','법률','채용','HR','finance','budget','legal','policy','급여']},
+  plan:{label:'기획 Planning',icon:'📊',color:'#8b5cf6',kw:['기획','전략','분석','리서치','조사','계획','planning','strategy','research','analysis','보고','정리']},
 };
 function _detectCat(title){
   if(!title)return'plan';
