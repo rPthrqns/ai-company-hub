@@ -239,7 +239,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
     <div id="lang-status" style="font-size:11px;color:var(--dim);margin-top:10px;min-height:20px"></div>
     <div style="display:flex;gap:8px;margin-top:16px;justify-content:center">
       <button onclick="genLang()" id="lang-btn" class="btn-primary" style="padding:10px 24px;font-size:13px">🚀 Set Up</button>
-      <button onclick="skipLang()" style="background:transparent;color:var(--dim);border:1px solid #334155;border-radius:8px;padding:10px 16px;font-size:12px;cursor:pointer">Skip</button>
+      <button onclick="skipLang()" id="lang-skip-btn" style="display:none;background:transparent;color:var(--dim);border:1px solid #334155;border-radius:8px;padding:10px 16px;font-size:12px;cursor:pointer">취소</button>
     </div>
   </div>
 </div>
@@ -394,9 +394,16 @@ function _e(s){if(!s)return'';const d=document.createElement('div');d.textConten
 // ─── i18n ───
 const UI={ko:{},en:{}};
 let lang=localStorage.getItem('hub-lang')||'ko';
+let _prevLang=null; // previous lang before reset
 async function checkLang(){
   const o=$('lang-overlay');
-  if(!localStorage.getItem('hub-lang')){o.style.display='flex';return}
+  const skip=$('lang-skip-btn');
+  if(!localStorage.getItem('hub-lang')){
+    // First visit — no skip button
+    o.style.display='flex';
+    if(skip)skip.style.display='none';
+    return;
+  }
   o.style.display='none';
   try{const r=await fetch(`/api/i18n/${lang}`);if(r.ok){UI[lang]=await r.json()}}catch(e){}
 }
@@ -409,8 +416,20 @@ async function genLang(){
     else{s.textContent='❌ '+d.error;s.style.color='#ef4444';b.disabled=false;b.textContent='🚀 Retry'}}
   catch(e){s.textContent='❌';b.disabled=false;b.textContent='🚀 Retry'}
 }
-function skipLang(){localStorage.setItem('hub-lang','en');lang='en';$('lang-overlay').style.display='none'}
-function resetLang(){localStorage.removeItem('hub-lang');$('lang-overlay').style.display='flex'}
+function skipLang(){
+  // Restore previous language
+  const restore=_prevLang||'ko';
+  localStorage.setItem('hub-lang',restore);lang=restore;
+  $('lang-overlay').style.display='none';
+  _prevLang=null;
+}
+function resetLang(){
+  // Remember current lang so skip can restore it
+  _prevLang=localStorage.getItem('hub-lang')||'ko';
+  $('lang-overlay').style.display='flex';
+  const skip=$('lang-skip-btn');
+  if(skip)skip.style.display='';
+}
 
 // ─── Browser Notifications ───
 let notifEnabled=localStorage.getItem('hub-notif')!=='off';
@@ -1033,8 +1052,10 @@ async function createCo(){
   const n=$('c-name').value.trim(),t=$('c-topic').value.trim();if(!n)return;
   const btn=document.querySelector('#create-modal .btn-primary');
   if(btn){btn.disabled=true;btn.textContent='⏳ 에이전트 생성 중...'}
+  // Use first company's lang as default, fallback to localStorage lang
+  const coLang=(cos.length&&cos[0].lang)?cos[0].lang:lang;
   try{
-    const r=await(await fetch('/api/companies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,topic:t,lang})})).json();
+    const r=await(await fetch('/api/companies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,topic:t,lang:coLang})})).json();
     if(r.ok){
       $('create-modal').classList.remove('show');$('c-name').value='';$('c-topic').value='';
       const agentCount=(r.company.agents||[]).length;
