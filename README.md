@@ -2,7 +2,7 @@
 
 > **AI agents quietly getting work done, one small task at a time.**
 >
-> "사부작사부작" — 한국어 의태어로 **조용하지만 꾸준히 작은 일을 처리하는 모습**. AI 에이전트들이 자율적으로 협업하는 가상 회사 시뮬레이션 플랫폼. CEO, CTO, CMO 등 에이전트를 배치하면 @멘션으로 소통하고, 칸반으로 작업을 관리하며, 결재를 올리고, 결과물을 만들어냅니다.
+> *"Sabujak-sabujak"* is a Korean onomatopoeia describing the act of **quietly and persistently chipping away at small tasks**. Build a virtual company, drop in a CEO/CTO/CMO, and let autonomous AI agents delegate via `@mentions`, manage work on a kanban, request approvals, and deliver real artifacts — while you sleep.
 
 ![Python](https://img.shields.io/badge/Python-3.12+-3776ab?style=flat&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
@@ -20,369 +20,401 @@ python3 -u dashboard/server.py
 # → http://localhost:3000
 ```
 
-## 작동 방식
+On first visit you'll be asked to pick a language. Type any language name (e.g. `English`, `Deutsch`, `한국어`, `日本語`, `עברית`) and the LLM translates the whole UI — including agent welcome messages, role labels, and even RTL layout for Hebrew/Arabic — in one pass.
 
-회사를 만들고, 주제를 정하면 AI 에이전트들이 자율적으로 일합니다.
+## How It Works
+
+Create a company, give it a topic, and AI agents start working on their own:
 
 ```
-나 → @CEO "회사 홈페이지를 만들어줘"
-  CEO → @CTO "프론트엔드 개발" + @CMO "디자인 시안"
-      → [TASK_ADD:홈페이지 제작:high]
-      → [APPROVAL:purchase:도메인 구매:호스팅 비용 승인 필요]
-  CTO → (개발 후 결과물 저장, CEO에게 보고)
-  CMO → (디자인 완료, CEO에게 보고)
+You → @CEO "Build our homepage"
+  CEO → @CTO "Handle the frontend" + @CMO "Design mockups"
+      → [TASK_ADD:Build homepage:high]
+      → [APPROVAL:purchase:Domain:need hosting fees approved]
+  CTO → (builds site, saves deliverables, reports back to CEO)
+  CMO → (ships design, reports back to CEO)
 ```
 
-에이전트 응답은 가드레일로 검증됩니다 — `@멘션`이나 `[COMMAND:]` 없이 "확인하겠습니다" 같은 준비 발언만 하면 거부되고 재시도합니다.
+Every agent response is validated by a **guardrail** — responses without `@mentions` or `[COMMAND:]` (just prep talk like "I'll check on that...") are rejected and retried with an enforcement prompt.
 
 ## UI
 
-### 레이아웃
-
-```
-┌─────────────────────────────────────────┐
-│  Header (회사 탭 / 검색 / 🤖＋ / 🔗)    │
-├────┬────────────────────────────────────┤
-│ 👔 │  👤 나                    14:23    │
-│ 📈 │  @CEO 시장 조사해줘                │
-│ 💻 │                                    │
-│ 🎨 │  👔 CEO                  14:24    │
-│ 👥 │  ## 시장 조사 결과                  │
-│    │  **경쟁사 분석** 완료               │
-│    │  | 항목 | 결과 |                    │
-│    │  @CMO 마케팅 데이터 수집해줘        │
-│    │                                    │
-├────┴────────────────────────────────────┤
-│  [📎] @에이전트 지시사항 입력...    [⏎]  │
-└─────────────────────────────────────────┘
-                          사이드 드로어 →
-                          📋 작업 / 🔔 결재
-                          🗂️ 계획 / 📂 자료
-```
-
-- **왼쪽 사이드바** — 에이전트 아이콘 (상태별 시각 표현)
-- **오른쪽 메인** — 채팅 영역 (마크다운 → HTML 렌더링)
-- **하단** — 커맨드 바 + 파일 첨부(📎) + 결재 승인/반려 모드
-- **사이드 드로어** — 작업, 결재, 계획 트리, 자료(이미지 미리보기)
-
-### 에이전트 아이콘 상태
-
-| 상태 | 시각 표현 |
-|------|----------|
-| 작업중 | 파란 테두리 + 글로우 펄스 |
-| 생각중 | 노란 테두리 + 빠른 펄스 + 깜빡이는 점 |
-| 대기 | 초록 테두리 (온라인) |
-| 비활성 | 회색 + 반투명 |
-| 등록중 | 보라 점선 + 회전 |
-
-### 채팅
-
-에이전트 응답이 **마크다운 → HTML**로 렌더링됩니다:
-
-- 헤딩 (`#`, `##`, `###`)
-- 볼드/이탈릭 (`**bold**`, `*italic*`)
-- 코드 블록 (` ```code``` `)
-- 테이블 (`| col | col |`)
-- 리스트 (순서/비순서)
-- 인용 (`> quote`)
-- 링크, 이미지, @멘션 하이라이트
-
-### 계획 트리
-
-🗂️ 버튼을 누르면 풀스크린 오버레이로 표시됩니다:
+### Layout
 
 ```
 ┌──────────────────────────────────────────┐
-│  🗂️ 작업 계획                         ✕  │
+│  Header (company tabs / search / 🤖＋ / 🔗) │
+├────┬─────────────────────────────────────┤
+│ 👔 │  👤 You                  14:23      │
+│ 📈 │  @CEO do market research            │
+│ 💻 │                                     │
+│ 🎨 │  👔 CEO                  14:24      │
+│ 👥 │  ## Market Research                 │
+│    │  **Competitor analysis** complete   │
+│    │  | Item | Result |                  │
+│    │  @CMO collect marketing data        │
+│    │                                     │
+├────┴─────────────────────────────────────┤
+│  [📎] @agent your instruction...  [⏎]    │
+└──────────────────────────────────────────┘
+                         Side drawer →
+                         📋 Tasks / 🔔 Approvals
+                         🗂️ Plan / 📂 Files
+```
+
+- **Left sidebar** — agent icons with per-state visual cues
+- **Right main** — chat area (markdown → HTML rendered)
+- **Bottom** — command bar + file attach (📎) + approval approve/reject mode
+- **Side drawer** — Tasks, Approvals, Plan Tree, Files (with image previews)
+
+### Agent Icon States
+
+| State | Visual |
+|-------|--------|
+| Working | Blue border + pulsing glow |
+| Thinking | Yellow border + rapid pulse + blinking dot |
+| Idle (active) | Green border (online) |
+| Inactive | Gray + semi-transparent |
+| Registering | Purple dashed + spinning |
+
+### Chat Rendering
+
+Agent responses are rendered from **Markdown to HTML**:
+
+- Headings (`#`, `##`, `###`)
+- Bold / italic (`**bold**`, `*italic*`)
+- Code blocks (` ```code``` `)
+- Tables (`| col | col |`)
+- Lists (ordered / unordered)
+- Blockquotes (`> quote`)
+- Links, images, @mention highlighting
+
+### Plan Tree
+
+Press the 🗂️ button for a full-screen overlay:
+
+```
+┌──────────────────────────────────────────┐
+│  🗂️ Work Plan                         ✕  │
 ├──────────────────────────────────────────┤
-│  [◐ 67%]  전체:12  완료:8  진행:2  대기:2 │
+│  [◐ 67%]  Total:12  Done:8  WIP:2  Wait:2 │
 ├──────────────────────────────────────────┤
-│  🤖CEO ████████░░ 4/5                    │
-│  💰CFO ██████░░░░ 3/5                    │
+│  🤖CEO ████████░░ 4/5                     │
+│  💰CFO ██████░░░░ 3/5                     │
 ├──────────────────────────────────────────┤
-│  💻 개발 Development          3/5 ██████░ │
-│    ✓ API 서버 구현            👨‍💻CTO      │
-│    ↻ DB 스키마 설계            👨‍💻CTO      │
-│                                          │
-│  🎨 디자인 Design            2/2 ████████ │
-│    (완료 — 자동 접힘)                      │
-│                                          │
-│  📢 마케팅 Marketing          1/3 ███░░░░ │
-│    ↻ SNS 콘텐츠 기획          📊CMO       │
+│  💻 Development                3/5 ██████░ │
+│    ✓ Build API server          👨‍💻CTO      │
+│    ↻ DB schema design          👨‍💻CTO      │
+│                                           │
+│  🎨 Design                     2/2 ████████ │
+│    (done — auto-collapsed)                │
+│                                           │
+│  📢 Marketing                  1/3 ███░░░░ │
+│    ↻ SNS content plan          📊CMO       │
 └──────────────────────────────────────────┘
 ```
 
-- **원형 진행률 게이지** (SVG) — 전체 완료율
-- **에이전트별 프로그레스바** — 누가 얼마나 했는지
-- **카테고리별 분류** — 개발, 기획, 마케팅, 디자인, 운영
-- **칸반 보드 작업 자동 병합** — plan_tasks + board_tasks 통합 표시
-- **완료 항목 자동 접기**, 접기/펼치기 토글
-- **인라인 추가/삭제** — 직접 작업 추가 가능
+- **Circular progress ring** (SVG) — overall completion
+- **Per-agent progress bars** — who's done how much
+- **Category grouping** — Development / Planning / Marketing / Design / Operations
+- **Kanban tasks auto-merged** — plan_tasks + board_tasks unified view
+- **Completed items auto-collapse**
+- **Inline add/delete** — manual task management
 
-## 핵심 기능
+## Core Features
 
-### 에이전트 시스템
-| 기능 | 설명 |
-|------|------|
-| **멀티 컴퍼니** | 여러 회사를 동시에 운영, 회사별 격리된 SQLite DB |
-| **에이전트 계층** | Master → CEO → 팀원, 동적 리더 감지 |
-| **시스템 커맨드** | `[TASK_ADD:]`, `[TASK_DONE:]`, `[APPROVAL:]`, `[CRON_ADD:]` |
-| **가드레일** | @멘션 또는 커맨드 필수, 준비 발언만 하면 거부+재시도 |
-| **메모리 스트림** | Stanford GenAgents 패턴: 최신성 × 중요도 × 관련성 |
-| **비용 추적** | 에이전트별 토큰 사용량 및 비용 모니터링 |
-| **실시간 SSE** | Server-Sent Events로 라이브 업데이트 |
+### Agent System
+| Feature | Description |
+|---------|-------------|
+| **Multi-company** | Run multiple companies simultaneously, isolated SQLite DBs per company |
+| **Agent hierarchy** | Master → CEO → team members with dynamic leader detection |
+| **System commands** | `[TASK_ADD:]`, `[TASK_DONE:]`, `[APPROVAL:]`, `[CRON_ADD:]` + unified `[TASK:add:]` form |
+| **Guardrails** | Every reply must contain an @mention or system command — prep talk is rejected and retried |
+| **Memory Stream** | Stanford GenAgents pattern: recency × importance × relevance |
+| **Cost tracking** | Per-agent token usage and cost monitoring |
+| **Real-time SSE** | Live updates via Server-Sent Events |
 
-### 커뮤니케이션
-| 기능 | 설명 |
-|------|------|
-| **채팅** | 마크다운 렌더링, 실시간 대화 표시 |
-| **파일 업로드** | 📎 버튼으로 이미지/문서 첨부, 에이전트에 전달 |
-| **이미지 서빙** | PNG/JPG 등 올바른 MIME 타입으로 반환 + 미리보기 |
-| **아웃소싱** | 회사 간 작업 위임 (Company A → Company B) |
-| **검색** | 전체 채팅 풀텍스트 검색 |
+### Communication
+| Feature | Description |
+|---------|-------------|
+| **Chat** | Markdown rendering, real-time conversation display |
+| **File upload** | 📎 button for images/docs, forwarded to agents |
+| **Image serving** | PNG/JPG returned with correct MIME + inline previews |
+| **Outsourcing** | Cross-company delegation (Company A → Company B) |
+| **Full-text search** | Search the entire chat history |
 
-### 작업 관리
-| 기능 | 설명 |
-|------|------|
-| **칸반 보드** | 대기 → 진행중 → 완료 |
-| **계획 트리** | 카테고리별 분류 + 자동 생성 + 원형 진행률 |
-| **결재 시스템** | `[APPROVAL:]` + 키워드 자동 감지, 중복 방지 |
-| **스프린트** | 타임박스 작업 주기 + 자동 회고 |
-| **에스컬레이션** | 실패 → 상위자 → CEO → Master (최대 2단계) |
-| **반복 작업** | `[CRON_ADD:]`로 정기 작업 스케줄링 |
+### Work Management
+| Feature | Description |
+|---------|-------------|
+| **Kanban board** | waiting → in-progress → done |
+| **Plan tree** | Category-grouped, auto-generated, circular progress |
+| **Approvals** | `[APPROVAL:]` + keyword auto-detection, deduplicated |
+| **Sprints** | Time-boxed work cycles with auto-retrospective |
+| **Escalation** | Failure → supervisor → CEO → Master (max 2 levels) |
+| **Recurring tasks** | `[CRON_ADD:]` schedules repeating work |
 
-### 거버넌스 & 분석
-| 기능 | 설명 |
-|------|------|
-| **승인 중복 방지** | 같은 제목의 pending 승인이 있으면 스킵 |
-| **예산 관리** | 회사별 예산 추적, 초과 시 자동 승인 요청 |
-| **KPI 대시보드** | 완료율, 비용 효율, 에이전트 랭킹 |
-| **위키** | 카테고리별 지식 베이스 (SOP, 가이드, 결정, 참고) |
-| **위험 관리** | 심각도별 위험 등록 + 대응 계획 |
-| **감사 로그** | 전체 행동 기록 |
-| **다국어** | 첫 방문 시 원하는 언어 입력 → LLM이 UI 번역 |
+### Governance & Analytics
+| Feature | Description |
+|---------|-------------|
+| **Approval dedup** | Pending approvals with the same title are skipped |
+| **Budget** | Per-company budget tracking with auto-approval on overrun |
+| **KPI dashboard** | Completion rate, cost efficiency, agent rankings |
+| **Wiki** | Categorized knowledge base (SOP, Guide, Decision, Reference) |
+| **Risk register** | Severity-sorted risks with mitigation plans |
+| **Audit log** | Full action trail |
+| **i18n (LLM-powered)** | Type any language on first visit — LLM translates UI, roles, welcome messages in one bundle |
 
-## 아키텍처
+## Internationalization (i18n)
 
-### 에이전트 통신 파이프라인
+Sabujak has first-class support for any language:
+
+1. **First visit** — language overlay. Type anything: `English`, `Deutsch`, `한국어`, `日本語`, `Français`, `हिन्दी`, `עברית`, `العربية`...
+2. The server calls the LLM **once** and translates a bundle containing:
+   - All UI strings (buttons, modals, toasts, notifications)
+   - Agent role labels (CEO → "Chief Executive", "Geschäftsführer", etc.)
+   - Welcome message template
+3. Translations are cached to `dashboard/i18n/{code}.json`, `roles.json`, `welcome.json`
+4. The UI applies immediately (no reload)
+5. **RTL support**: Hebrew, Arabic, Persian, Urdu, Yiddish automatically mirror the layout via `<html dir="rtl">` + CSS overrides
+6. **Locale-aware time formatting** via `Intl.DateTimeFormat`
+
+Supported by default: Korean, English, Japanese, Chinese.
+Any other language is auto-generated on demand.
+
+## Architecture
+
+### Communication Pipeline
 
 ```
-사용자 명령 → 서버 큐잉 (에이전트당 최대 10개)
-          → 에이전트 컨텍스트 로드 (신문 + 인박스 + 메모리 + 작업)
-          → 에이전트 응답
-          → 가드레일 검증
-             ├─ 통과 → 커맨드 파싱 (칸반/승인/계획 업데이트)
-             └─ 실패 → 거부 + 재시도 (enforcement prompt)
-          → @멘션 발견 → 대상 에이전트에 전달
-          → 실패 시 → 상위자에게 에스컬레이션
+User command → queued (max 10 per agent)
+             → agent loads context (newspaper + inbox + memory + tasks)
+             → agent response
+             → guardrail check
+                ├─ pass → parse commands (kanban / approvals / plan update)
+                └─ fail → reject + retry with enforcement prompt
+             → @mentions resolved → target agents nudged
+             → on failure → escalate upward
 ```
 
-### 3단계 재시도 + 에스컬레이션
-1. **시도 1**: 일반 호출 (120초 타임아웃)
-2. **시도 2**: 락 정리 + 2초 대기 + 새 세션으로 재시도
-3. **시도 3**: 전체 세션 리셋 + 재시도
-4. **에스컬레이션**: 상위자 → 리더 → Master (최대 2단계)
+### 3-Tier Retry + Escalation
+1. **Attempt 1**: normal call (120s timeout)
+2. **Attempt 2**: lock cleanup + 2s wait + new session retry
+3. **Attempt 3**: full session reset + retry
+4. **Escalation**: supervisor → leader → Master (max 2 hops)
 
-### 메모리 스트림 (Stanford GenAgents)
-에이전트별 메모리 스트림:
-- **최신성**: 최근 메모리 점수 높음 (지수 감쇠)
-- **중요도**: 1-10 점 (응답 길이/중요성 기반)
-- **관련성**: 현재 쿼리와 키워드 매칭
-- 에이전트당 100개 상한, 자동 정리
+### Memory Stream (Stanford GenAgents)
+- **Recency** — recent memories score higher (exponential decay)
+- **Importance** — scored 1–10 by response length/significance
+- **Relevance** — keyword match vs. current query
+- Capped at 100 memories per agent, auto-pruned
 
-### 동시성 모델
-- **FIFO 큐**: 에이전트당 최대 10개 대기 메시지
-- **세마포어**: 설정 가능한 동시 에이전트 수
-- **바쁨 추적**: 에이전트별 busy 상태, 데드락 방지
-- **락 자동 정리**: 프로세스 kill 및 시작 시 `.lock` 파일 정리
+### Concurrency
+- FIFO queue, up to 10 pending messages per agent
+- Semaphore-bounded concurrent agent execution
+- Per-agent busy tracking — no deadlocks
+- Automatic `.lock` cleanup on process kill and startup
 
-## 에이전트 커맨드
+## Agent Commands
 
-에이전트가 응답에 포함시켜 시스템을 제어합니다. **두 가지 포맷 모두 지원**:
+Agents control the system by including commands in their responses. **Both formats supported**:
 
-### Legacy 포맷 (현재 프롬프트가 사용)
+### Legacy format (current prompts use this)
 ```
-[TASK_ADD:작업명:high]                — 칸반에 작업 추가
-[TASK_START:작업명]                   — 작업 시작
-[TASK_DONE:작업명]                    — 작업 완료
-[TASK_BLOCK:작업명:사유]              — 작업 차단
-[APPROVAL:카테고리:제목:상세]          — 결재 요청
-[CRON_ADD:이름:간격(분):프롬프트]      — 반복 작업 등록
-[CRON_DEL:이름]                      — 반복 작업 삭제
-```
-
-### 통합 포맷 (옵션)
-```
-[TASK:add:작업명:high]
-[TASK:start:작업명]
-[TASK:done:작업명]
-[TASK:block:작업명:사유]
-[CRON:add:이름:간격:프롬프트]
-[CRON:del:이름]
+[TASK_ADD:name:high]            — add kanban task
+[TASK_START:name]               — start task
+[TASK_DONE:name]                — complete task
+[TASK_BLOCK:name:reason]        — block task
+[APPROVAL:category:title:detail] — request approval
+[CRON_ADD:name:minutes:prompt]  — schedule recurring task
+[CRON_DEL:name]                 — delete recurring task
 ```
 
-두 포맷이 같은 응답 안에서 혼용 가능합니다.
+### Unified format (optional)
+```
+[TASK:add:name:high]
+[TASK:start:name]
+[TASK:done:name]
+[TASK:block:name:reason]
+[CRON:add:name:minutes:prompt]
+[CRON:del:name]
+```
+
+Both formats can coexist in the same response.
 
 ## API
 
-### 회사 & 채팅
+### Companies & Chat
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/companies` | GET | 회사 목록 |
-| `/api/company/{cid}` | GET | 회사 상세 (에이전트, 채팅, 작업) |
-| `/api/companies` | POST | 회사 생성 `{name, topic, lang}` |
-| `/api/company/delete` | POST | 회사 삭제 |
-| `/api/chat/{cid}` | POST | 메시지 전송 `{text}` |
-| `/api/upload/{cid}` | POST | 파일 업로드 (multipart/form-data) |
-| `/api/search?q=` | GET | 채팅 검색 |
-| `/api/sse` | GET | 실시간 SSE 스트림 |
+| `/api/companies` | GET | List companies |
+| `/api/company/{cid}` | GET | Company detail (agents, chat, tasks) |
+| `/api/companies` | POST | Create company `{name, topic, lang}` |
+| `/api/company/delete` | POST | Delete company |
+| `/api/chat/{cid}` | POST | Send message `{text}` |
+| `/api/upload/{cid}` | POST | File upload (multipart/form-data) |
+| `/api/search?q=` | GET | Full-text chat search |
+| `/api/sse` | GET | Real-time SSE stream |
 
-### 에이전트
+### Agents
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/agent-add/{cid}` | POST | 에이전트 추가 `{name, role, emoji}` |
-| `/api/agent-delete/{cid}/{aid}` | POST | 에이전트 삭제 |
-| `/api/agent-reactivate/{cid}/{aid}` | POST | 에이전트 재활성화 |
-| `/api/models` | GET | 사용 가능한 LLM 모델 |
+| `/api/agent-add/{cid}` | POST | Add agent `{name, role, emoji}` |
+| `/api/agent-delete/{cid}/{aid}` | POST | Delete agent |
+| `/api/agent-reactivate/{cid}/{aid}` | POST | Reactivate agent |
+| `/api/models` | GET | Available LLM models |
 
-### 작업 관리
+### Work Management
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/board-tasks/{cid}` | GET | 칸반 작업 |
-| `/api/plan-tasks/{cid}` | GET | 계획 트리 |
-| `/api/plan-task-add/{cid}` | POST | 계획 작업 추가 |
-| `/api/approvals/{cid}?status=pending` | GET | 대기 중 결재 |
-| `/api/approval-approve/{cid}` | POST | 승인 |
-| `/api/approval-reject/{cid}` | POST | 반려 |
+| `/api/board-tasks/{cid}` | GET | Kanban tasks |
+| `/api/plan-tasks/{cid}` | GET | Plan tree |
+| `/api/plan-task-add/{cid}` | POST | Add plan task |
+| `/api/approvals/{cid}?status=pending` | GET | Pending approvals |
+| `/api/approval-approve/{cid}` | POST | Approve |
+| `/api/approval-reject/{cid}` | POST | Reject |
 
-### 자료 & 분석
+### Files & Analytics
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/deliverables/{cid}` | GET | 결과물 (이미지 미리보기) |
-| `/api/file/{cid}/{path}` | GET | 파일 다운로드 (MIME 타입 자동 감지) |
-| `/api/download/{cid}` | GET | 전체 결과물 ZIP |
-| `/api/costs/{cid}` | GET | 비용 추적 |
-| `/api/kpi/{cid}` | GET | KPI 대시보드 |
-| `/api/narrative/{cid}` | GET | 활동 로그 |
+| `/api/deliverables/{cid}` | GET | Deliverables (with image previews) |
+| `/api/file/{cid}/{path}` | GET | File download (auto-detected MIME type) |
+| `/api/download/{cid}` | GET | All deliverables as ZIP |
+| `/api/costs/{cid}` | GET | Cost tracking |
+| `/api/kpi/{cid}` | GET | KPI dashboard |
+| `/api/narrative/{cid}` | GET | Activity log |
 
-### 크로스 컴퍼니
+### Cross-Company
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/cross-nudge` | POST | 아웃소싱 `{from_cid, to_cid, text}` |
-| `/api/snapshot/{cid}` | POST | 스냅샷 저장 |
-| `/api/fork/{snap_id}` | POST | 스냅샷에서 포크 |
+| `/api/cross-nudge` | POST | Outsource `{from_cid, to_cid, text}` |
+| `/api/snapshot/{cid}` | POST | Save snapshot |
+| `/api/fork/{snap_id}` | POST | Fork from snapshot |
 
-## 프로젝트 구조
+### i18n
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/i18n/{lang}` | GET | Get UI strings for a language |
+| `/api/i18n/generate` | POST | Generate UI + roles + welcome via LLM `{language}` |
+| `/api/i18n/languages` | GET | List available languages |
+
+## Project Structure
 
 ```
 sabujak/
 ├── dashboard/
-│   ├── server.py            # FastAPI 서버 (~5100줄, 100+ 엔드포인트)
-│   ├── db.py                # SQLite 회사별 샤딩 (~1600줄)
-│   ├── pool.py              # DB 커넥션 풀
+│   ├── server.py            # FastAPI server (~5100 lines, 100+ endpoints)
+│   ├── db.py                # SQLite per-company sharding (~1600 lines)
+│   ├── pool.py              # DB connection pool
 │   │
-│   ├── index.html           # SPA 셸 (170줄, 외부 자산 참조만)
-│   ├── app.css              # 스타일시트 (220줄)
-│   ├── app.js               # 프론트엔드 로직 (812줄)
+│   ├── index.html           # SPA shell (references external CSS/JS)
+│   ├── app.css              # Stylesheet (~220 lines, incl. RTL overrides)
+│   ├── app.js               # Frontend logic (~850 lines)
 │   │
-│   ├── config.py            # 매직 넘버/타임아웃 중앙화 (env 오버라이드)
-│   ├── logger.py            # 중앙 로깅 어댑터
-│   ├── observability.py     # request_id, 프롬프트 덤프
+│   ├── config.py            # Centralized magic numbers/timeouts (env overridable)
+│   ├── logger.py            # Central logging adapter
+│   ├── observability.py     # request_id + prompt dump
 │   │
-│   ├── parsers/             # 순수 파서 (DB 의존성 없음, 단위 테스트 가능)
-│   │   ├── commands.py      #   [TASK_*], [APPROVAL:], [CRON_*] + 통합 [TASK:add:]
-│   │   ├── guardrails.py    #   준비 발언 판정, 액션 필수 체크
-│   │   ├── categories.py    #   작업 카테고리 분류 (5개)
-│   │   └── heuristics.json  #   prep 키워드 + 카테고리 키워드 외부 설정
+│   ├── parsers/             # Pure parsers (no DB — unit-testable)
+│   │   ├── commands.py      #   [TASK_*], [APPROVAL:], [CRON_*] + unified [TASK:add:]
+│   │   ├── guardrails.py    #   prep-talk detection, required-action check
+│   │   ├── categories.py    #   task category classifier
+│   │   └── heuristics.json  #   externalized prep keywords + category keywords
 │   │
 │   ├── prompts/
-│   │   └── welcome.py       # 다국어 환영 메시지 (ko/en/ja/zh)
+│   │   └── welcome.py       # Localized welcome messages (loads welcome.json)
 │   │
-│   ├── config.json          # 에이전트 템플릿 & 토픽 설정
-│   ├── i18n/                # 다국어 UI 문자열
-│   │   ├── en.json
-│   │   └── ko.json
+│   ├── config.json          # Agent templates & topic presets
+│   ├── i18n/                # i18n strings
+│   │   ├── en.json, ko.json, ja.json   # UI translations
+│   │   ├── welcome.json     # Welcome message templates
+│   │   └── roles.json       # Runtime role translations
 │   └── runtime/
 │       ├── base.py          # AgentRuntime ABC
-│       └── openclaw.py      # OpenClaw CLI 런타임 (JSONL 폴링)
+│       └── openclaw.py      # OpenClaw CLI runtime (JSONL polling)
 │
-├── tests/                   # pytest 단위 테스트 (47개)
-│   ├── conftest.py
-│   ├── test_command_parser.py    # 28개 (legacy + 통합 DSL)
-│   ├── test_guardrails.py        # 11개
-│   ├── test_categories.py        # 6개
-│   └── test_welcome.py           # 3개
+├── tests/                   # pytest unit tests (47)
+│   ├── test_command_parser.py
+│   ├── test_guardrails.py
+│   ├── test_categories.py
+│   └── test_welcome.py
 │
-├── data/                    # 회사 데이터 (.gitignored)
-│   ├── hub.db               # 메타 DB
+├── data/                    # Company data (.gitignored)
+│   ├── hub.db               # Meta DB
 │   └── {company-id}/
-│       ├── company.db       # 회사별 SQLite (20+ 테이블)
-│       ├── _shared/         # 결과물, 공유 파일
-│       └── workspaces/      # 에이전트별 워크스페이스
+│       ├── company.db       # Per-company SQLite (20+ tables)
+│       ├── _shared/         # Deliverables, shared files
+│       └── workspaces/      # Per-agent workspaces
 │
 ├── pytest.ini
 ├── requirements.txt
 └── README.md
 ```
 
-## 서버 관리
+## Server Management
 
 ```bash
-# 시작
+# Start
 nohup python3 -u dashboard/server.py > /tmp/sabujak.log 2>&1 &
 
-# 재시작
+# Restart
 pkill -f 'python3.*server.py'; sleep 2
 nohup python3 -u dashboard/server.py > /tmp/sabujak.log 2>&1 &
 
-# 상태 확인
+# Health
 curl -s http://localhost:3000/api/companies | python3 -m json.tool
 
-# 로그
+# Logs
 tail -f /tmp/sabujak.log
+
+# Watch mode (auto-restart on file changes)
+./scripts/watch.sh
 ```
 
-## 테스트
-
-순수 파서/가드레일/카테고리 로직은 DB 의존성 없이 단위 테스트됩니다 (47개).
+## Tests
 
 ```bash
-pytest                       # 전체 실행
-pytest tests/test_command_parser.py -v   # 커맨드 파서만
+pytest                                # run all tests (47 total)
+pytest tests/test_command_parser.py -v
 ```
 
-## 환경변수
+Pure parsers (commands / guardrails / categories) are unit-tested without DB or LLM dependencies — so they run in milliseconds.
 
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| `PORT` | `3000` | 서버 포트 |
-| `DATA_DIR` | `data/` | 회사 데이터 디렉토리 |
-| `OPENCLAW_MODEL` | `zai/glm-5` | 에이전트 LLM 모델 |
-| `AGENT_TIMEOUT` | `180` | 에이전트 호출 타임아웃 (초) |
-| `AGENT_RETRY_TIMEOUT` | `120` | 재시도 타임아웃 |
-| `MAX_CONCURRENT` | `5` | 동시 실행 에이전트 수 |
-| `AGENT_QUEUE_MAX` | `10` | 에이전트당 큐 최대 크기 |
-| `LOG_LEVEL` | `INFO` | 로그 레벨 (DEBUG/INFO/WARNING/ERROR) |
-| `LOG_FILE` | (없음) | 로그 파일 경로 (지정 시 회전 로그) |
-| `DEBUG_PROMPTS` | `0` | `1`이면 nudge 호출 시 프롬프트+응답을 파일로 덤프 |
-| `PROMPT_DUMP_DIR` | `/tmp/aichub-prompts` | 덤프 저장 경로 |
+## Environment Variables
 
-## 관측성
+| Var | Default | Description |
+|-----|---------|-------------|
+| `PORT` | `3000` | Server port |
+| `DATA_DIR` | `data/` | Company data directory |
+| `OPENCLAW_MODEL` | `zai/glm-5` | Agent LLM model |
+| `AGENT_TIMEOUT` | `180` | Agent call timeout (seconds) |
+| `AGENT_RETRY_TIMEOUT` | `120` | Retry timeout |
+| `MAX_CONCURRENT` | `5` | Concurrent agents |
+| `AGENT_QUEUE_MAX` | `10` | Max queue per agent |
+| `LOG_LEVEL` | `INFO` | Logging level (DEBUG/INFO/WARNING/ERROR) |
+| `LOG_FILE` | *(none)* | Log file path (rotating if set) |
+| `DEBUG_PROMPTS` | `0` | Set to `1` to dump nudge prompts & replies to files |
+| `PROMPT_DUMP_DIR` | `/tmp/sabujak-prompts` | Where to write prompt dumps |
 
-- **request_id**: 모든 HTTP 응답에 `X-Request-Id` 헤더 자동 부여
+## Observability
+
+- **Request tracing** — every HTTP response carries an `X-Request-Id` header:
   ```bash
   curl -sD - http://localhost:3000/api/companies | grep -i request-id
   # x-request-id: c82aafd0d801
   ```
-- **프롬프트 덤프**: `DEBUG_PROMPTS=1` 시 `/tmp/aichub-prompts/`에 마크다운 형식으로 저장
-  - 파일명: `{timestamp}_nudge_{agent_id}.md`
-  - 내용: 전체 프롬프트 + 에이전트 응답
+- **Prompt dumps** — with `DEBUG_PROMPTS=1`, every `nudge_agent` call saves the full prompt and response as Markdown:
+  - Filename: `{timestamp}_nudge_{agent_id}.md`
+  - Contents: full prompt + agent reply
 
-## 요구 사항
+## Requirements
 - Python 3.12+
-- [OpenClaw](https://openclaw.io) (에이전트 런타임)
-- LLM API 키
-- (선택) `pytest` — 단위 테스트 실행 시
+- [OpenClaw](https://openclaw.io) (agent runtime)
+- An LLM API key
+- (optional) `pytest` for running unit tests
 
 ## License
 MIT
+
+---
+
+*"사부작사부작 일하다 보면 어느새 완성되어 있다." — AI agents, quietly, one task at a time.*
