@@ -1,4 +1,4 @@
-"""Centralized configuration for AI Company Hub.
+"""Centralized configuration for sabujak.
 
 All magic numbers, timeouts, and tunable parameters live here.
 Override via environment variables when noted.

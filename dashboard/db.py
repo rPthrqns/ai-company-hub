@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SQLite database layer for AI Company Hub.
+"""SQLite database layer for sabujak.
 
 Sharding layout:
   hub.db              — companies, snapshots, webhook_routes  (meta)

@@ -1,6 +1,8 @@
-# AI Company Hub
+# sabujak (사부작)
 
-> AI 에이전트들이 자율적으로 협업하는 가상 회사 시뮬레이션 플랫폼. CEO, CTO, CMO 등 에이전트를 배치하면 @멘션으로 소통하고, 칸반으로 작업을 관리하며, 결재를 올리고, 결과물을 만들어냅니다.
+> **AI agents quietly getting work done, one small task at a time.**
+>
+> "사부작사부작" — 한국어 의태어로 **조용하지만 꾸준히 작은 일을 처리하는 모습**. AI 에이전트들이 자율적으로 협업하는 가상 회사 시뮬레이션 플랫폼. CEO, CTO, CMO 등 에이전트를 배치하면 @멘션으로 소통하고, 칸반으로 작업을 관리하며, 결재를 올리고, 결과물을 만들어냅니다.
 
 ![Python](https://img.shields.io/badge/Python-3.12+-3776ab?style=flat&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
