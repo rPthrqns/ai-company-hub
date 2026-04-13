@@ -3992,10 +3992,79 @@ async def api_agent_delete(cid: str, aid: str):
     data, code = _call(Handler._handle_agent_delete, f"/api/agent-delete/{cid}/{aid}")
     return JSONResponse(data, status_code=code)
 
+@app.get("/api/agent-persona/{cid}/{aid}")
+async def api_get_persona(cid: str, aid: str):
+    """Get agent's custom persona notes."""
+    ws = DATA / cid / "workspaces" / aid
+    persona_file = ws / "PERSONA.md"
+    text = ''
+    if persona_file.exists():
+        text = persona_file.read_text(encoding='utf-8')
+    return {"ok": True, "persona": text}
+
+@app.post("/api/agent-persona/{cid}/{aid}")
+async def api_set_persona(cid: str, aid: str, request: Request):
+    """Save custom persona notes and inject into SOUL.md."""
+    body = await request.json()
+    persona = body.get('persona', '').strip()
+    ws = DATA / cid / "workspaces" / aid
+    ws.mkdir(parents=True, exist_ok=True)
+    # Save persona separately
+    (ws / "PERSONA.md").write_text(persona, encoding='utf-8')
+    # Inject into SOUL.md
+    soul_file = ws / "SOUL.md"
+    if soul_file.exists():
+        content = soul_file.read_text(encoding='utf-8')
+        # Remove old persona block if present
+        import re as _re
+        content = _re.sub(r'\n## Custom Persona\n[\s\S]*?(?=\n## |\Z)', '', content)
+        # Append new persona
+        if persona:
+            content += f"\n## Custom Persona\n{persona}\n"
+        soul_file.write_text(content, encoding='utf-8')
+    print(f"[persona] {cid}/{aid}: {len(persona)} chars")
+    return {"ok": True}
+
 @app.post("/api/agent-reactivate/{cid}/{aid}")
 async def api_agent_reactivate(cid: str, aid: str):
     data, code = _call(Handler._handle_agent_reactivate, f"/api/agent-reactivate/{cid}/{aid}")
     return JSONResponse(data, status_code=code)
+
+@app.post("/api/agent-stop/{cid}/{aid}")
+async def api_agent_stop(cid: str, aid: str):
+    """Stop a running agent: clear busy flag, drain queue, kill openclaw process."""
+    key = f"{cid}:{aid}"
+    agent_id = f"{cid}-{aid}"
+    stopped = False
+    # 1. Clear busy state
+    with _AGENT_STATE_LOCK:
+        if key in _AGENT_BUSY:
+            _AGENT_BUSY.discard(key)
+            stopped = True
+    # 2. Broadcast agent_done to clear frontend thinking state
+    sse_broadcast('agent_done', {'cid': cid, 'agent_id': aid, 'agent_name': aid})
+    # 3. Drain message queue
+    if key in _AGENT_QUEUES:
+        _AGENT_QUEUES[key].clear()
+    # 4. Kill any running openclaw process for this agent
+    killed_pids = []
+    try:
+        import subprocess as _sp
+        _sp.run(['pkill', '-f', f'openclaw.*{agent_id}'], timeout=5)
+        stopped = True
+    except Exception:
+        pass
+    # 5. Update agent status in company data
+    company = get_company(cid)
+    if company:
+        for a in company.get('agents', []):
+            if a['id'] == aid and a.get('status') == 'working':
+                a['status'] = 'active'
+                stopped = True
+        update_company(cid, {'agents': company['agents']})
+        sse_broadcast('company_update', {'id': cid, 'company': get_company(cid)})
+    print(f"[agent-stop] {key}: stopped={stopped} killed_pids={killed_pids}")
+    return {"ok": True, "stopped": stopped, "killed": killed_pids}
 
 @app.post("/api/task-add/{cid}")
 async def api_task_add(cid: str, request: Request):

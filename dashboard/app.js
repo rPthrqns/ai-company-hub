@@ -192,13 +192,17 @@ function getAgentStatus(a){
 function renderIconGrid(){
   const el=$('icon-grid');if(!el)return;
   const c=cos.find(x=>x.id===cur);
-  if(!c||!c.agents){el.innerHTML='<div style="color:var(--dim);font-size:11px;padding:20px">에이전트 없음</div>';return}
+  if(!c||!c.agents){el.innerHTML='';return}
   el.innerHTML=c.agents.map(a=>{
     const st=getAgentStatus(a);
-    const sel='';
-    return`<div class="agent-icon s-${st} ${sel}" onclick="selectAgent('${a.id}')">
+    const busy=st==='working'||st==='thinking';
+    const cost=a.cost?a.cost.total_cost:0;
+    const costStr=cost>0?`$${cost.toFixed(4)}`:'';
+    return`<div class="agent-icon s-${st}" onclick="selectAgent('${a.id}')" ondblclick="event.preventDefault();openPersona('${a.id}')">
       <div class="ai-circle">${a.emoji||'🤖'}<span class="ai-dot"></span></div>
       <span class="ai-name">${_e(a.name)}</span>
+      ${costStr?`<span class="ai-cost">${costStr}</span>`:''}
+      ${busy?`<button class="ai-stop" onclick="event.stopPropagation();stopAgent('${a.id}')" title="Stop">■</button>`:''}
     </div>`;
   }).join('');
 }
@@ -207,6 +211,34 @@ function selectAgent(aid){
   const c=cos.find(x=>x.id===cur);
   const a=c?(c.agents||[]).find(x=>x.id===aid):null;
   if(a)directMsg(a.name);
+}
+
+// Double-click to edit persona
+let _personaAid=null;
+async function openPersona(aid){
+  if(!cur)return;
+  _personaAid=aid;
+  const c=cos.find(x=>x.id===cur);
+  const a=c?(c.agents||[]).find(x=>x.id===aid):null;
+  $('persona-title').textContent=`🧠 ${a?(a.emoji+' '+a.name):'Agent'} Persona`;
+  try{const r=await fetch(`/api/agent-persona/${cur}/${aid}`);const d=await r.json();$('persona-text').value=d.persona||''}catch(e){$('persona-text').value=''}
+  $('persona-modal').classList.add('show');
+}
+async function savePersona(){
+  if(!cur||!_personaAid)return;
+  const persona=$('persona-text').value.trim();
+  try{await fetch(`/api/agent-persona/${cur}/${_personaAid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({persona})});
+    toast('✅ Persona saved');$('persona-modal').classList.remove('show')}catch(e){toast(t('toast.generic_error'))}
+}
+
+async function stopAgent(aid){
+  if(!cur)return;
+  try{
+    const r=await fetch(`/api/agent-stop/${cur}/${aid}`,{method:'POST'});
+    const d=await r.json();
+    if(d.ok)toast('⏹ '+aid+' stopped');
+  }catch(e){}
+  refresh();
 }
 
 // ─── Markdown → HTML ───
@@ -285,11 +317,24 @@ function renderChat(){
     const name=isUser?t('chat.me'):(m.from||t('chat.system'));
     const cls=isUser?'cm-user':'cm-agent';
     let textHtml=_md(m.text||'');
+    // Detect delegation targets (@mentions in agent messages)
+    let delegHtml='';
+    if(!isUser&&m.text){
+      const mentions=(m.text.match(/@([A-Za-z]\w*)/g)||[]).map(x=>x.slice(1));
+      const unique=[...new Set(mentions)].filter(n=>n!==m.from&&n.toLowerCase()!=='master');
+      if(unique.length){
+        delegHtml='<div class="cm-delegation">'+unique.map(n=>{
+          const tgt=agentMap[n];
+          return`<span class="cm-deleg-tag">${tgt?tgt.emoji+' ':''}${_e(n)}</span>`;
+        }).join('')+'</div>';
+      }
+    }
     return`<div class="chat-msg ${cls}">
       <span class="cm-avatar">${emoji}</span>
       <div class="cm-body">
         <div class="cm-name">${_e(name)}</div>
         <div class="cm-text">${textHtml}</div>
+        ${delegHtml}
         <div class="cm-time">${m.time||''}</div>
       </div>
     </div>`;
@@ -436,6 +481,7 @@ function toggleDrawer(name){
   else if(name==='approvals'){title.textContent=t('drawer.title_approvals');renderDrawerApprovals(body)}
   else if(name==='plan'){openPlan();return}
   else if(name==='files'){title.textContent=t('drawer.title_files');renderDrawerFiles(body)}
+  else if(name==='comms'){title.textContent='💬 Agent Comms';renderDrawerComms(body)}
   $('drawer').classList.add('open');
 }
 function openDrawerWith(name,titleText,html){
@@ -472,18 +518,130 @@ function renderDrawerFiles(el){
     el.innerHTML=files.slice(0,30).map(f=>{
       const ext=f.path.split('.').pop().toLowerCase();
       const isImg=['png','jpg','jpeg','gif','webp','svg'].includes(ext);
-      const icon=isImg?'🖼️':ext==='md'?'📝':ext==='json'?'📋':'📄';
+      const isText=['md','txt','json','csv','html','css','js','py'].includes(ext);
+      const icon=isImg?'🖼️':ext==='md'?'📝':ext==='json'?'📋':ext==='py'?'🐍':'📄';
       const url=`/api/file/${cur}/${f.path}`;
       let preview='';
       if(isImg)preview=`<img src="${url}" style="max-width:100%;max-height:120px;border-radius:4px;margin-top:4px;display:block;cursor:pointer" onclick="event.stopPropagation();window.open('${url}','_blank')">`;
+      const previewBtn=isText?`<button onclick="event.stopPropagation();previewFile('${url}','${ext}')" style="background:none;border:1px solid #374151;color:var(--dim);border-radius:4px;padding:1px 5px;font-size:8px;cursor:pointer;flex-shrink:0">preview</button>`:'';
       return`<div class="file-item" style="flex-direction:column;align-items:flex-start" onclick="window.open('${url}','_blank')">
-        <div style="display:flex;align-items:center;gap:6px;width:100%"><span>${icon}</span><span style="flex:1;color:#60a5fa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_e(f.path)}</span><span style="color:var(--dim);font-size:8px">${f.modified||''}</span></div>
+        <div style="display:flex;align-items:center;gap:6px;width:100%"><span>${icon}</span><span style="flex:1;color:#60a5fa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_e(f.path)}</span>${previewBtn}<span style="color:var(--dim);font-size:8px">${f.modified||''}</span></div>
         ${preview}
       </div>`}).join('');
   }).catch(()=>{el.innerHTML=`<div style="color:var(--dim);font-size:10px">${_e(t('drawer.load_fail'))}</div>`});
   fetch(`/api/newspaper/${cur}`).then(r=>r.json()).then(d=>{
     if(d.newspaper)el.innerHTML+=`<div style="margin-top:12px;font-size:10px;font-weight:600;color:var(--dim);margin-bottom:4px">${_e(t('drawer.report'))}</div><div style="font-size:10px;color:var(--text);white-space:pre-wrap;line-height:1.5;background:var(--card);border-radius:6px;padding:8px">${_e(d.newspaper)}</div>`;
   }).catch(()=>{});
+}
+
+async function previewFile(url,ext){
+  try{
+    const r=await fetch(url);
+    const raw=await r.text();
+    document.querySelectorAll('.detail-popup').forEach(el=>el.remove());
+    const popup=document.createElement('div');
+    popup.className='detail-popup';
+    popup.style.width='500px';popup.style.maxHeight='70vh';
+    let body='';
+    if(ext==='md'){
+      body=_md(raw);
+    }else if(ext==='json'){
+      try{body=`<pre style="font-size:10px;overflow:auto;background:#0f172a;padding:8px;border-radius:6px">${_e(JSON.stringify(JSON.parse(raw),null,2))}</pre>`}
+      catch(e){body=`<pre style="font-size:10px">${_e(raw)}</pre>`}
+    }else{
+      body=`<pre style="font-size:10px;overflow:auto;background:#0f172a;padding:8px;border-radius:6px">${_e(raw.substring(0,5000))}</pre>`;
+    }
+    popup.innerHTML=`<button class="dp-close" onclick="this.parentElement.remove()">✕</button><div style="font-size:11px;line-height:1.6;color:var(--text);overflow-y:auto;max-height:60vh">${body}</div>`;
+    document.body.appendChild(popup);
+    const closer=e=>{if(!popup.contains(e.target)){popup.remove();document.removeEventListener('click',closer)}};
+    setTimeout(()=>document.addEventListener('click',closer),100);
+  }catch(e){toast(t('drawer.load_fail'))}
+}
+
+// ─── Multi-Company Dashboard ───
+function openDashboard(){
+  $('dash-overlay').classList.add('show');
+  renderDashboard();
+}
+function closeDashboard(){$('dash-overlay').classList.remove('show')}
+async function renderDashboard(){
+  const el=$('dash-content');if(!el)return;
+  if(!cos.length){el.innerHTML='<div style="color:var(--dim);text-align:center;padding:40px">No companies</div>';return}
+  // Fetch costs for each company
+  const data=await Promise.all(cos.map(async c=>{
+    let cost={total_cost:0},taskCount=0,doneCount=0;
+    try{cost=await(await fetch(`/api/costs/${c.id}`)).json()}catch(e){}
+    try{const ts=await(await fetch(`/api/board-tasks/${c.id}`)).json();taskCount=ts.length;doneCount=ts.filter(x=>x.status==='완료').length}catch(e){}
+    return{...c,cost,taskCount,doneCount};
+  }));
+  el.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">`+
+    data.map(c=>{
+      const agents=c.agents||[];
+      const pct=c.taskCount?Math.round(c.doneCount/c.taskCount*100):0;
+      const costVal=c.cost?.total_cost||0;
+      return`<div style="background:var(--card);border-radius:10px;padding:14px;border:1px solid var(--border);cursor:pointer" onclick="closeDashboard();sel('${c.id}')">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:20px">🏢</span>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#f1f5f9">${_e(c.name)}</div>
+            <div style="font-size:9px;color:var(--dim)">${_e(c.topic||'')}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;margin-bottom:8px">
+          <div style="text-align:center">
+            <div style="font-size:16px;font-weight:800;color:var(--accent)">${agents.length}</div>
+            <div style="font-size:8px;color:var(--dim)">Agents</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:16px;font-weight:800;color:var(--green)">${c.doneCount}/${c.taskCount}</div>
+            <div style="font-size:8px;color:var(--dim)">Tasks</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:16px;font-weight:800;color:var(--yellow)">$${costVal.toFixed(3)}</div>
+            <div style="font-size:8px;color:var(--dim)">Cost</div>
+          </div>
+        </div>
+        <div style="height:4px;background:#0f172a;border-radius:2px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:2px"></div>
+        </div>
+        <div style="display:flex;gap:3px;margin-top:8px;flex-wrap:wrap">
+          ${agents.map(a=>`<span style="font-size:14px" title="${_e(a.name)}">${a.emoji||'🤖'}</span>`).join('')}
+        </div>
+      </div>`;
+    }).join('')+'</div>';
+}
+
+// ─── Agent Comms (drawer) ───
+function renderDrawerComms(el){
+  if(!chatMessages.length){el.innerHTML='<div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">No agent communications yet</div>';return}
+  const c=cos.find(x=>x.id===cur);
+  const agentMap={};
+  (c?.agents||[]).forEach(a=>{agentMap[a.name]=a});
+  // Filter: agent messages that contain @mentions to other agents
+  const comms=chatMessages.filter(m=>{
+    if(m.type!=='agent'||!m.from)return false;
+    const mentions=(m.text||'').match(/@([A-Za-z]\w*)/g);
+    if(!mentions)return false;
+    return mentions.some(mt=>{const n=mt.slice(1);return agentMap[n]&&n!==m.from});
+  });
+  if(!comms.length){el.innerHTML='<div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">No agent-to-agent messages yet</div>';return}
+  el.innerHTML=comms.slice(-30).map(m=>{
+    const fromAg=agentMap[m.from];
+    const mentions=(m.text||'').match(/@([A-Za-z]\w*)/g)||[];
+    const targets=[...new Set(mentions.map(x=>x.slice(1)))].filter(n=>agentMap[n]&&n!==m.from);
+    const arrow=targets.map(n=>{const ag=agentMap[n];return`${ag?ag.emoji:''} ${n}`}).join(', ');
+    const snippet=_e((m.text||'').replace(/@\w+/g,'').trim().substring(0,120));
+    return`<div style="padding:6px 8px;border-bottom:1px solid #1e293b;font-size:10px">
+      <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
+        <span>${fromAg?fromAg.emoji:'🤖'}</span>
+        <span style="font-weight:600;color:#a5b4fc">${_e(m.from)}</span>
+        <span style="color:var(--dim)">→</span>
+        <span style="color:#c4b5fd">${arrow}</span>
+        <span style="margin-left:auto;color:var(--dim);font-size:8px">${m.time||''}</span>
+      </div>
+      <div style="color:var(--text);line-height:1.4">${snippet}${(m.text||'').length>120?'...':''}</div>
+    </div>`;
+  }).join('');
 }
 
 // ─── Plan (Visual Overlay) ───

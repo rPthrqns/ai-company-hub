@@ -68,6 +68,11 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 /* Connection lines between agents (subtle) */
 .ai-link{font-size:7px;color:var(--dim);position:absolute;top:-8px;right:-4px;opacity:0}
 .agent-icon.s-working .ai-link,.agent-icon.s-thinking .ai-link{opacity:1}
+/* Stop button on busy agents */
+.ai-stop{position:absolute;top:-4px;left:-4px;width:16px;height:16px;border-radius:4px;background:#ef4444;color:white;border:2px solid var(--card);font-size:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;padding:0;line-height:1;opacity:.8;transition:opacity .15s}
+.ai-stop:hover{opacity:1;transform:scale(1.15)}
+/* Cost label under agent icon */
+.ai-cost{font-size:7px;color:var(--dim);background:rgba(30,41,59,.8);padding:0 3px;border-radius:3px;white-space:nowrap}
 
 /* (status panel removed — chat is now the right panel) */
 
@@ -82,6 +87,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .cm-text{color:var(--text);white-space:pre-wrap;word-break:break-word}
 .cm-text img{max-width:200px;border-radius:6px;margin-top:4px;cursor:pointer}
 .cm-time{font-size:8px;color:var(--dim);margin-top:2px}
+/* Delegation chain badge */
+.cm-delegation{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.cm-deleg-tag{display:inline-flex;align-items:center;gap:2px;background:rgba(139,92,246,.15);color:#a78bfa;font-size:9px;padding:1px 6px;border-radius:8px;font-weight:600}
+.cm-deleg-tag::before{content:'→';color:var(--dim);margin-right:2px}
 .chat-empty{text-align:center;color:var(--dim);font-size:11px;padding:20px;margin:auto}
 
 /* Section helpers */
@@ -259,3 +268,39 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 [dir="rtl"] .ai-circle,[dir="rtl"] .sp-avatar{direction:ltr}
 /* Allow long words in narrow buttons (German etc) */
 .btn-primary,.hdr-btn,.cmd-send{word-break:keep-all;overflow-wrap:break-word}
+
+/* ─── Mobile Responsive ─── */
+@media(max-width:640px){
+  .hdr{padding:4px 8px;gap:4px;flex-wrap:wrap}
+  .hdr h1{font-size:12px}
+  .tabs{margin:0 2px;gap:2px}
+  .tab{font-size:10px;padding:3px 6px}
+  .hdr-btn{font-size:8px;padding:2px 4px}
+  .btn-primary{font-size:10px;padding:3px 6px}
+  /* Sidebar → top horizontal bar */
+  .dashboard{flex-direction:column}
+  .dash-left{width:100%;flex-direction:row;overflow-x:auto;overflow-y:hidden;border-right:none;border-bottom:1px solid var(--border);padding:4px}
+  .icon-grid{flex-direction:row;gap:8px;padding:6px 8px}
+  .ai-circle{width:36px;height:36px;font-size:16px}
+  .ai-dot{width:7px;height:7px}
+  .ai-name{font-size:7px;max-width:40px}
+  .ai-stop{width:12px;height:12px;font-size:6px;top:-2px;left:-2px}
+  /* Chat takes full width */
+  .dash-right{flex:1}
+  .chat-msg{max-width:95%;font-size:10px}
+  .cm-avatar{font-size:13px;width:18px}
+  /* Command bar */
+  .cmd-input{font-size:12px;padding:6px 10px}
+  .cmd-send{padding:6px 12px;font-size:11px}
+  /* Drawer wider on mobile, toggle as bottom bar */
+  .drawer{width:100%}
+  .drawer-toggle{position:fixed;right:auto;left:0;top:auto;bottom:44px;transform:none;flex-direction:row;gap:0;z-index:55;width:100%;justify-content:center;background:var(--panel);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+  .drawer-toggle button{border-radius:0;border:none;border-right:1px solid var(--border);width:auto;padding:6px 12px;font-size:14px}
+  /* Plan overlay full screen */
+  .plan-panel{width:100%;max-width:100%;max-height:100vh;border-radius:0}
+  /* Modals full width */
+  .modal{width:95%;max-width:95%}
+  /* Search */
+  #search{width:50px !important}
+  #search-results{width:90vw;right:5vw !important;left:5vw !important}
+}
