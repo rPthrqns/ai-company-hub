@@ -285,10 +285,18 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   .tabs{position:fixed;top:33px;left:0;right:0;z-index:30;background:var(--panel);
     border-bottom:1px solid var(--border);margin:0;padding:3px 8px;gap:3px;overflow-x:auto;flex-wrap:nowrap}
   .tab{font-size:9px;padding:2px 6px;flex-shrink:0}
-  /* Push content below header(~33px) + tabs(~26px) = ~59px */
-  .empty,.dashboard{margin-top:28px}
-  /* Main: full remaining height, vertical stack */
-  .dashboard{flex-direction:column;height:calc(100vh - 33px - 26px)}
+  /* Fixed layout: header + tabs pinned top, cmd bar pinned bottom */
+  .hdr{position:fixed;top:0;left:0;right:0;z-index:40;height:33px}
+  .tabs{position:fixed;top:33px;left:0;right:0;z-index:39;background:var(--panel);
+    border-bottom:1px solid var(--border);margin:0;padding:3px 8px;gap:3px;overflow-x:auto;flex-wrap:nowrap;height:26px}
+  .tab{font-size:9px;padding:2px 6px;flex-shrink:0}
+  /* Bottom bar: fixed at bottom */
+  .bottom-bar{position:fixed !important;bottom:0;left:0;right:0;z-index:40;flex-shrink:0}
+  .cmd-input{font-size:12px;padding:6px 8px}
+  .cmd-send{padding:6px 10px;font-size:11px}
+  /* Empty/dashboard: fill between header+tabs and bottom-bar */
+  .empty{margin-top:59px;margin-bottom:50px}
+  .dashboard{flex-direction:column;margin-top:59px;margin-bottom:50px;height:calc(100vh - 59px - 50px)}
   /* Agent bar: thin horizontal strip */
   .dash-left{width:100%;flex-shrink:0;flex-direction:row;overflow-x:auto;overflow-y:hidden;
     border-right:none;border-bottom:1px solid var(--border);padding:0;max-height:48px;min-height:48px}
@@ -299,7 +307,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   .ai-name{font-size:6px;max-width:32px}
   .ai-cost{font-size:5px}
   .ai-stop{width:10px;height:10px;font-size:5px;top:-2px;left:-2px}
-  /* Chat: MUST fill remaining space */
+  /* Chat: fill remaining */
   .dash-right{flex:1;min-height:0;overflow:hidden}
   .chat-area{height:100%;min-height:0;overflow-y:auto}
   .chat-msg{max-width:95%;font-size:10px}
@@ -308,15 +316,15 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   .cm-time{font-size:7px}
   .cm-text{font-size:10px}
   .cm-deleg-tag{font-size:8px}
-  /* Command bar: always visible at bottom */
-  .bottom-bar{flex-shrink:0;position:relative;z-index:20}
-  .cmd-input{font-size:12px;padding:6px 8px}
-  .cmd-send{padding:6px 10px;font-size:11px}
-  /* Drawer toggle: hidden, replaced by ≡ button in cmd bar */
-  .drawer-toggle{display:none !important}
-  .mobile-menu-btn{display:block !important}
-  /* Drawer: slide from bottom */
-  .drawer{width:100%;height:60vh;top:auto;bottom:0;transform:translateY(100%)}
+  /* Drawer toggle: show as bar above bottom-bar */
+  .drawer-toggle{position:fixed;bottom:50px;left:0;right:0;z-index:39;
+    transform:none;flex-direction:row;gap:0;width:100%;justify-content:center;
+    background:var(--panel);border-top:1px solid var(--border)}
+  .drawer-toggle button{border-radius:0;border:none;border-right:1px solid var(--border);
+    width:auto;padding:5px 10px;font-size:12px}
+  .mobile-menu-btn{display:none !important}
+  /* Drawer: slide from bottom above toggle */
+  .drawer{width:100%;height:50vh;top:auto;bottom:50px;transform:translateY(100%)}
   .drawer.open{transform:translateY(0)}
   /* Overlays */
   .plan-panel{width:100%;max-width:100%;max-height:100vh;border-radius:0}
