@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title data-i18n="app.title">Sabujak</title>
-<link rel="stylesheet" href="/app.css?v=3">
+<link rel="stylesheet" href="/app.css?v=4">
 </head>
 <body>
 
@@ -66,6 +66,7 @@
     <div class="cmd-normal" id="cmd-normal">
       <input type="file" id="file-input" style="display:none" onchange="uploadFile(this)" accept="image/*,.pdf,.md,.txt,.json,.csv,.zip">
       <button onclick="$('file-input').click()" data-i18n-attr="title:cmd.attach" style="background:var(--card);border:1px solid #374151;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:12px;color:var(--dim)" title="Attach file">📎</button>
+      <button onclick="toggleMobileMenu()" class="mobile-menu-btn" style="display:none;background:var(--card);border:1px solid #374151;border-radius:10px;padding:8px 10px;cursor:pointer;font-size:12px;color:var(--dim)">≡</button>
       <input class="cmd-input" id="cmd-input" data-i18n-attr="placeholder:cmd.placeholder" placeholder="@agent enter instruction..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}">
       <button class="cmd-send" id="cmd-send-btn" onclick="send()">⏎</button>
     </div>
@@ -192,6 +193,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=3"></script>
+<script src="/app.js?v=4"></script>
 </body>
 </html>

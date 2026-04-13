@@ -506,6 +506,16 @@ function openDrawerWith(name,titleText,html){
 }
 function closeDrawer(){curDrawer=null;$('drawer').classList.remove('open');document.querySelectorAll('.drawer-toggle button').forEach(b=>b.classList.remove('active'))}
 
+// Mobile menu: cycle through drawers
+let _mobileMenuIdx=0;
+const _mobileMenuItems=['tasks','approvals','files','comms'];
+function toggleMobileMenu(){
+  const name=_mobileMenuItems[_mobileMenuIdx%_mobileMenuItems.length];
+  _mobileMenuIdx++;
+  if(curDrawer===name){closeDrawer();return}
+  toggleDrawer(name);
+}
+
 function renderDrawerTasks(el){
   if(!tasks.length){el.innerHTML=`<div style="color:var(--dim);text-align:center;padding:20px;font-size:11px">${_e(t('drawer.no_tasks'))}</div>`;return}
   el.innerHTML=tasks.map(t=>{const cls=t.status==='완료'?'done':t.status==='진행중'?'progress':'';
