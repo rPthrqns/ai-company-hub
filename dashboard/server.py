@@ -1553,6 +1553,53 @@ def restore_running_tasks():
 
 from prompts.welcome import welcome_msg as _welcome_msg  # extracted to prompts/welcome.py
 
+def _generate_custom_soul(agent_id, workspace, name, role, company_name, topic, lang):
+    """Use LLM to generate a role-specific SOUL.md for custom (non-template) agents.
+    Runs in a background thread so it doesn't block agent registration."""
+    def _gen():
+        lang_name = LANG.get(lang, 'Korean')
+        prompt = (
+            f"You are generating a SOUL.md personality file for an AI agent.\n\n"
+            f"Agent: {name}\n"
+            f"Role: {role}\n"
+            f"Company: {company_name}\n"
+            f"Company topic: {topic}\n"
+            f"Language: {lang_name}\n\n"
+            f"Write a SOUL.md in {lang_name} that includes:\n"
+            f"1. A brief identity section (who they are, their expertise)\n"
+            f"2. Specific skills and focus areas for this role\n"
+            f"3. How they should communicate (@mentions to delegate, report to leader)\n"
+            f"4. What deliverables they should produce (save to _shared/deliverables/)\n"
+            f"5. Key rules: execute immediately, no prep talk, NO_REPLY forbidden\n\n"
+            f"Include these system commands they can use:\n"
+            f"- [TASK_ADD:name:priority] — add kanban task\n"
+            f"- [TASK_DONE:name] — complete task\n"
+            f"- [APPROVAL:category:title:detail] — request approval\n"
+            f"- @AgentName instruction — delegate to teammate\n"
+            f"- @Master report — report to human master\n\n"
+            f"Return ONLY the markdown content (no ```). Keep it under 40 lines."
+        )
+        try:
+            result = RUNTIME.run(agent_id, f"{agent_id}-soul-gen", prompt, timeout=60)
+            if result and len(result) > 50:
+                # Clean up: remove ``` wrappers if present
+                clean = result.strip()
+                if clean.startswith('```'):
+                    clean = clean.split('\n', 1)[-1]
+                if clean.endswith('```'):
+                    clean = clean.rsplit('```', 1)[0]
+                clean = clean.strip()
+                if not clean.startswith('#'):
+                    clean = f"# SOUL.md — {name} ({role})\n\n{clean}"
+                soul_file = workspace / "SOUL.md"
+                soul_file.write_text(clean, encoding='utf-8')
+                print(f"[soul-gen] {agent_id}: generated {len(clean)} chars")
+            else:
+                print(f"[soul-gen] {agent_id}: LLM returned empty/short, keeping default")
+        except Exception as e:
+            print(f"[soul-gen] {agent_id}: failed ({e}), keeping default")
+    threading.Thread(target=_gen, daemon=True).start()
+
 # ── Runtime-extended role translations (filled by /api/i18n/generate) ──
 _ROLES_FILE = BASE / "dashboard" / "i18n" / "roles.json"
 
@@ -3461,7 +3508,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         aid = re.sub(r'[^a-z0-9]', '-', name.lower())
         agent_id = f"{cid}-{aid}"
         agent_workspace = DATA / cid / "workspaces" / aid
-        register_agent(agent_id, agent_workspace, name, role, company.get('name',''), emoji, lang=company.get('lang','ko'), wait=True, company_id=cid)
+        company_lang = company.get('lang', 'ko')
+        register_agent(agent_id, agent_workspace, name, role, company.get('name',''), emoji, lang=company_lang, wait=True, company_id=cid)
+        # Generate role-specific SOUL.md via LLM for custom agents (not in default templates)
+        if aid not in AGENT_TEMPLATES:
+            _generate_custom_soul(agent_id, agent_workspace, name, role, company.get('name',''), company.get('topic',''), company_lang)
         agent = {
             "id": aid, "agent_id": agent_id, "name": name, "emoji": emoji,
             "role": role, "status": "active",
