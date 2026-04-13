@@ -138,7 +138,7 @@ Press the 🗂️ button for a full-screen overlay:
 | **Memory Stream** | Stanford GenAgents pattern: recency × importance × relevance |
 | **Agent stop** | ■ button to kill a running agent mid-task (clears queue + kills process) |
 | **Agent persona** | Double-click icon → edit personality notes → injected into SOUL.md |
-| **Custom SOUL gen** | Non-template agents get LLM-generated role-specific SOUL.md on hire |
+| **SOUL generation** | Every agent gets an LLM-generated role+company-specific SOUL.md on hire |
 | **Cost tracking** | Per-agent cost label on icons + header stats |
 | **Real-time SSE** | Live updates via Server-Sent Events |
 
@@ -178,34 +178,31 @@ Press the 🗂️ button for a full-screen overlay:
 
 ## Agent SOUL Generation
 
-Agents run based on their `SOUL.md` — a personality/protocol file in their workspace. Sabujak uses a **two-tier system**:
-
-### Built-in agents (9 templates)
-`CEO`, `CMO`, `CTO`, `CFO`, `Designer`, `HR`, `Sales`, `Legal`, `Support`
-
-These get a **generic SOUL.md** with standard protocol rules. They're well-known roles that don't need customization.
-
-### Custom agents (everything else)
-When you hire a custom agent — whether manually via 🤖＋ or when the CEO recommends one — the LLM **auto-generates a role-specific SOUL.md**:
+Every agent runs based on its `SOUL.md` — a personality/protocol file in its workspace. Sabujak uses the LLM to **auto-generate a role-and-company-specific SOUL.md** for every agent:
 
 ```
-Hire "PixelArtist" (role: "2D sprite creation")
+Company created: "Acme Games" (topic: "2D MMORPG")
   ↓
-LLM receives: name, role, company name, topic, language
+For EACH agent (CEO, CTO, CMO, Designer, ...):
   ↓
-Generates SOUL.md with:
-  · Identity & expertise for this specific role
-  · Relevant skills and deliverable types
-  · Communication rules (@mentions, reporting)
+LLM receives: agent name, role, "Acme Games", "2D MMORPG", language
+  ↓
+Generates tailored SOUL.md:
+  · Identity & expertise specific to this role at THIS company
+  · Skills relevant to the company's topic
+  · Deliverable types they should produce
+  · Communication rules (@mentions, reporting chain)
   · System commands reference
-  · Company context
   ↓
-Saved to workspace/pixelartist/SOUL.md
+Saved to workspace/{agent}/SOUL.md
 ```
 
-This runs in a **background thread** — the agent registers immediately and the SOUL.md is written as soon as the LLM responds. If generation fails, the default generic template is kept as fallback.
+This means a **game company CEO** and an **ad agency CEO** get completely different SOULs — different priorities, different expertise, different deliverables.
 
-You can further customize any agent's behavior by **double-clicking their icon** → editing persona notes.
+- Runs in a **background thread** (doesn't block registration)
+- If LLM fails, a generic fallback template is used
+- Works for all hire paths: initial company creation, manual 🤖＋, CEO recommendation, approval-based hiring
+- You can further customize any agent by **double-clicking their icon** → editing persona notes
 
 ## Internationalization (i18n)
 
