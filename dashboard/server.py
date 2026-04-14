@@ -67,6 +67,7 @@ _EVENT_LOOP: asyncio.AbstractEventLoop | None = None
 AGENT_LOCK = threading.Lock()
 _COMPANY_LOCKS = {}
 _COMPANY_LOCKS_MUTEX = threading.Lock()
+_RECENTLY_DELETED = set()  # CIDs being cleaned up in background; blocks recreation
 
 def _get_company_lock(cid):
     with _COMPANY_LOCKS_MUTEX:
@@ -320,8 +321,16 @@ def process_task_commands(cid, text, agent_id):
     existing_approvals = db_get_approvals(cid) if approval_specs else []
     for spec in approval_specs:
         cat, title, detail = spec['category'], spec['title'], spec['detail']
-        # Dedup: skip if a pending approval with same title already exists
-        if any(a.get('title','') == title and a.get('status') == 'pending' for a in existing_approvals):
+        # Dedup: skip if pending approval with same title, or same agent+category+title-prefix
+        is_dup = any(
+            a.get('status') == 'pending' and (
+                (a.get('title','') == title) or
+                (a.get('category','') == cat and title and a.get('title','')
+                 and a.get('title','')[:30] == title[:30])
+            )
+            for a in existing_approvals
+        )
+        if is_dup:
             print(f"[approval] SKIP duplicate: {cat}/{title} (already pending)")
             continue
         company = get_company(cid)
@@ -1698,6 +1707,9 @@ def create_company(name, topic, lang="ko"):
     slug = re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')
     if not slug: slug = 'company'
     company_id = slug + "-" + datetime.now().strftime('%m%d%H%M')
+    # Ensure ID doesn't collide with a company being deleted in background
+    if company_id in _RECENTLY_DELETED:
+        company_id = slug + "-" + datetime.now().strftime('%m%d%H%M%S')
     org = get_org_for_topic(topic)
     agents = []
     for aid in org:
@@ -3499,6 +3511,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 _AGENT_BUSY.discard(k)
         for k in [k for k in _ESCALATION_COUNTS if k.startswith(f"{cid}:")]:
             _ESCALATION_COUNTS.pop(k, None)
+        # Mark as recently deleted to prevent ID collision during bg cleanup
+        _RECENTLY_DELETED.add(cid)
         # Delete DB and files SYNCHRONOUSLY (so UI sees it gone immediately)
         db_delete_company(cid)
         for suffix in ['.json', '.json.bak', '-queue.json', '-queue.json.bak']:
@@ -3546,6 +3560,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 failed = still_failed
             if failed: print(f"[delete] orphan agents: {failed}")
             else: print(f"[delete] company {cid} fully cleaned")
+            _RECENTLY_DELETED.discard(cid)
         threading.Thread(target=_bg_delete_agents, daemon=True).start()
 
     # ─── Agent Add Handler ───

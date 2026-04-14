@@ -711,9 +711,9 @@ function renderPlan(){
     parent_id:null, _board:true, _boardId:t.id, result:t.result||t.detail||''
   }));
 
-  // Combined: plan tasks + board tasks (dedup by title)
-  const planTitles=new Set(_planTasks.map(t=>t.title));
-  const extraBoard=boardItems.filter(b=>!planTitles.has(b.title));
+  // Combined: plan tasks + board tasks (dedup by title+agent to avoid hiding same-named tasks from different agents)
+  const planKeys=new Set(_planTasks.map(t=>(t.title||'')+'|'+(t.agent_id||'')));
+  const extraBoard=boardItems.filter(b=>!planKeys.has((b.title||'')+'|'+(b.agent_id||'')));
   const allItems=[..._planTasks,...extraBoard];
 
   const total=allItems.length;
