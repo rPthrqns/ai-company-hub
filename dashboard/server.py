@@ -356,6 +356,45 @@ def process_task_commands(cid, text, agent_id):
         results.append(f"📋 기안 '{title}' 제출됨 (결재라인: {' → '.join(approval_line)})")
         print(f"[approval] {agent_id} submitted: {cat}/{title}")
     
+    # ─ HIRE command: [HIRE:Name:Role:Emoji] → creates approval for team member ─
+    for m in re.finditer(r'\[HIRE:([^:]+):([^:]+):([^\]]+)\]', text):
+        hire_name = m.group(1).strip()
+        hire_role = m.group(2).strip()
+        hire_emoji = m.group(3).strip() or '🤖'
+        # Create as approval (master must approve)
+        company = get_company(cid)
+        agent = next((a for a in company.get('agents',[]) if a['id']==agent_id), None) if company else None
+        agent_name = agent.get('name','') if agent else agent_id
+        approval = {
+            'id': str(uuid.uuid4())[:8],
+            'from_agent': agent_name,
+            'from_emoji': agent.get('emoji','🤖') if agent else '🤖',
+            'approval_type': 'hire',
+            'category': 'hr',
+            'title': f"Hire {hire_emoji} {hire_name}",
+            'detail': f"Role: {hire_role}\nProposed by: {agent_name}\n\nApprove to create this agent.",
+            'hire_name': hire_name,
+            'hire_role': hire_role,
+            'hire_emoji': hire_emoji,
+            'status': 'pending',
+            'time': datetime.now().strftime('%H:%M'),
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat(),
+            'comments': '[]'
+        }
+        # Dedup: don't propose same name twice
+        existing_approvals_hire = db_get_approvals(cid)
+        if any(a.get('hire_name','') == hire_name and a.get('status') == 'pending' for a in existing_approvals_hire):
+            print(f"[hire] SKIP duplicate: {hire_name} (already pending)")
+            continue
+        # Also skip if agent already exists
+        if company and any(a.get('name','').lower() == hire_name.lower() for a in company.get('agents',[])):
+            print(f"[hire] SKIP: {hire_name} already exists")
+            continue
+        append_approval(cid, approval)
+        results.append(f"🤝 '{hire_name}' 고용 기안 제출됨 ({hire_role})")
+        print(f"[hire] {agent_id} proposed: {hire_emoji} {hire_name} ({hire_role})")
+
     # 자동 작업 감지: [TASK_XXX] 명령이 없을 때 패턴 기반 자동 추가
     has_task_cmd = bool(re.search(r'\[TASK_', text))
     if not has_task_cmd:
@@ -1601,6 +1640,9 @@ def _build_soul_protocol(lang='en') -> str:
 - `[CRON_ADD:name:minutes:prompt]` — {p.get('cron_add', 'create recurring task')}
 - `[CRON_DEL:name]` — {p.get('cron_del', 'delete recurring task')}
 
+### Hiring (CEO/Leaders only)
+- `[HIRE:Name:Role:Emoji]` — propose a new team member (requires master approval)
+
 ## {p.get('rules_title', 'Rules (ABSOLUTE — no exceptions)')}
 - {p.get('rule_immediate', 'Execute tasks IMMEDIATELY. No prep talk.')}
 - {p.get('rule_must_action', 'Every response MUST contain @mention OR system command.')}
@@ -1707,47 +1749,56 @@ def create_company(name, topic, lang="ko"):
     slug = re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')
     if not slug: slug = 'company'
     company_id = slug + "-" + datetime.now().strftime('%m%d%H%M')
-    # Ensure ID doesn't collide with a company being deleted in background
     if company_id in _RECENTLY_DELETED:
         company_id = slug + "-" + datetime.now().strftime('%m%d%H%M%S')
-    org = get_org_for_topic(topic)
-    agents = []
-    for aid in org:
-        t = AGENT_TEMPLATES[aid]
-        agent_id = f"{company_id}-{aid}"
-        agent_name = t["name"]
-        agent_emoji = t["emoji"]
-        agent_role = get_agent_role(aid, lang)
-        agent_workspace = DATA / company_id / "workspaces" / aid
-        def make_done_callback(cid, aid_val, total_agents, lang):
-            def _done():
-                c = get_company(cid)
-                if c:
-                    all_ready = True
-                    for a in c.get('agents', []):
-                        if a['id'] == aid_val:
-                            a['status'] = 'active'
-                        if a.get('status') != 'active':
-                            all_ready = False
-                    update_company(cid, {"agents": c['agents']})
-                    if all_ready:
-                        w = _welcome_msg(c['name'], c['topic'], c['agents'], lang)
-                        c['chat'].append({"type": "system", "from": "시스템", "emoji": "✅", "to": "", "text": w['ready']})
-                        c['chat'].append({"type": "agent", "from": "CEO", "emoji": "👔", "to": "마스터", "text": w['greeting']})
-                        c['activity_log'].append({"time": datetime.now().strftime('%H:%M'), "agent": "시스템", "text": w['ready']})
-                        c['activity_log'].append({"time": datetime.now().strftime('%H:%M'), "agent": "CEO", "text": w['log']})
-                        update_company(cid, {"chat": c['chat'], "activity_log": c['activity_log']})
-            return _done
-        register_agent(agent_id, agent_workspace, agent_name, agent_role, name, agent_emoji,
-                       lang=lang, wait=False, on_done=make_done_callback(company_id, aid, len(org), lang), company_id=company_id)
-        # LLM generates role+company-specific SOUL.md (background thread)
-        _generate_custom_soul(agent_id, agent_workspace, agent_name, agent_role, name, topic, lang)
-        agents.append({
-            "id": aid, "agent_id": agent_id, "name": agent_name, "emoji": agent_emoji,
-            "role": agent_role, "status": "registering",
-            "tasks": [], "messages": [],
-            "cost": {"total_tokens": 0, "total_cost": 0.0, "last_run_cost": 0.0},
-        })
+
+    # ── CEO-first model: only create CEO, then CEO proposes team ──
+    ceo_t = AGENT_TEMPLATES.get('ceo', {"name": "CEO", "emoji": "👔", "role": {"ko": "총괄", "en": "Executive"}})
+    ceo_id = f"{company_id}-ceo"
+    ceo_name = ceo_t["name"]
+    ceo_emoji = ceo_t["emoji"]
+    ceo_role = get_agent_role('ceo', lang)
+    ceo_workspace = DATA / company_id / "workspaces" / "ceo"
+    lang_name = LANG.get(lang, 'Korean')
+
+    def _ceo_ready(cid, lang):
+        def _done():
+            c = get_company(cid)
+            if not c: return
+            for a in c.get('agents', []):
+                if a['id'] == 'ceo':
+                    a['status'] = 'active'
+            update_company(cid, {"agents": c['agents']})
+            w = _welcome_msg(c['name'], c['topic'], c['agents'], lang)
+            c['chat'].append({"type": "system", "from": "시스템", "emoji": "✅", "to": "", "text": w['ready']})
+            update_company(cid, {"chat": c['chat']})
+            # Auto-nudge CEO to propose team
+            team_prompt = (
+                f"You are the CEO of '{c['name']}'. Topic: {c['topic']}.\n\n"
+                f"Analyze this topic and propose the team you need. "
+                f"For EACH team member, use this EXACT command:\n"
+                f"[HIRE:Name:Role:Emoji]\n\n"
+                f"Example:\n"
+                f"[HIRE:CTO:Technology and Development:💻]\n"
+                f"[HIRE:Designer:UI/UX Design:🎨]\n"
+                f"[HIRE:MarketingLead:Marketing Strategy:📢]\n\n"
+                f"Propose 2-5 team members suited for '{c['topic']}'.\n"
+                f"After the [HIRE:] commands, greet the master in {lang_name} and explain your team plan.\n"
+                f"Include @Master in your response."
+            )
+            threading.Thread(target=lambda: nudge_agent(cid, team_prompt, 'ceo'), daemon=True).start()
+        return _done
+
+    register_agent(ceo_id, ceo_workspace, ceo_name, ceo_role, name, ceo_emoji,
+                   lang=lang, wait=False, on_done=_ceo_ready(company_id, lang), company_id=company_id)
+    _generate_custom_soul(ceo_id, ceo_workspace, ceo_name, ceo_role, name, topic, lang)
+
+    agents = [{
+        "id": "ceo", "agent_id": ceo_id, "name": ceo_name, "emoji": ceo_emoji,
+        "role": ceo_role, "status": "registering",
+        "tasks": [], "messages": [],
+        "cost": {"total_tokens": 0, "total_cost": 0.0, "last_run_cost": 0.0},
+    }]
     W = _welcome_msg(name, topic, agents, lang)
     company = {
         "id": company_id, "name": name, "topic": topic, "lang": lang,
@@ -3818,22 +3869,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 threading.Thread(target=nudge_agent, args=(cid, nudge_text, agent_target.upper()), daemon=True).start()
 
             # If agent addition was approved, actually add the agent
-            if resolution == 'approved' and approval.get('type') == 'agent_add':
+            if resolution == 'approved' and approval.get('type') in ('agent_add', 'hire') or approval.get('approval_type') in ('agent_add', 'hire'):
                 company = get_company(cid)
                 if company:
-                    detail = approval.get('detail', '')
-                    # Extract name/role from detail text like "에이전트 추가 요청: 🤖 이름 (역할)"
-                    import re as _re
-                    m = _re.search(r'(\S+)\s*\(([^)]+)\)', detail)
-                    if m:
-                        add_name = m.group(1)
-                        add_role = m.group(2)
-                        # Find emoji from detail
-                        em = _re.search(r'([\U0001F300-\U0001F9FF])', detail)
-                        add_emoji = em.group(1) if em else '🤖'
+                    # Try structured hire fields first (from [HIRE:] command)
+                    add_name = approval.get('hire_name', '')
+                    add_role = approval.get('hire_role', '')
+                    add_emoji = approval.get('hire_emoji', '🤖')
+                    if not add_name:
+                        # Fallback: parse from detail text
+                        detail = approval.get('detail', '')
+                        import re as _re
+                        m = _re.search(r'(\S+)\s*\(([^)]+)\)', detail)
+                        if m:
+                            add_name = m.group(1)
+                            add_role = m.group(2)
+                            em = _re.search(r'([\U0001F300-\U0001F9FF])', detail)
+                            add_emoji = em.group(1) if em else '🤖'
+                    if add_name:
                         self._do_add_agent(cid, company, add_name, add_role, add_emoji, '')
+                        print(f"[hire] approved: {add_emoji} {add_name} ({add_role})")
                     else:
-                        print(f"[approval] could not parse agent detail: {detail}")
+                        print(f"[approval] could not parse agent from: {approval}")
             self._json({"ok": True, "approval": approval})
         else:
             self._json({"error": "not found"}, 404)
