@@ -1831,8 +1831,7 @@ def create_company(name, topic, lang="ko"):
                     a['status'] = 'active'
             update_company(cid, {"agents": c['agents']})
             w = _welcome_msg(c['name'], c['topic'], c['agents'], lang)
-            c['chat'].append({"type": "system", "from": "시스템", "emoji": "✅", "to": "", "text": w['ready']})
-            # Notify user: CEO is analyzing and building team
+            # Notify user: CEO is analyzing and building team (skip "all ready" since it's just CEO)
             team_building_msg = {
                 "ko": "🔍 CEO가 주제를 분석하고 팀 구성안을 준비하고 있습니다... 잠시만 기다려주세요.",
                 "en": "🔍 CEO is analyzing the topic and preparing a team proposal... Please wait.",
