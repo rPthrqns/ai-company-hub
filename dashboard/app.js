@@ -993,8 +993,9 @@ async function createCo(){
       $('create-modal').classList.remove('show');$('c-name').value='';$('c-topic').value='';
       const agentCount=(r.company.agents||[]).length;
       cur=r.company.id;load();
-      _setCmdBarLock(true,t('cmd.bar_locked'));
-      toast(t('toast.created',{name:n,count:agentCount}));
+      // CEO-first model: only 1 agent initially, lock briefly
+      _setCmdBarLock(true,'⏳ CEO...');
+      toast(`🏢 ${n}`);
       _watchAgentReady(r.company.id,agentCount);
     }else toast(t('toast.create_fail'));
   }catch(e){toast(t('toast.create_error'))}
