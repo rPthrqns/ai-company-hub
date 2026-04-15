@@ -1832,9 +1832,18 @@ def create_company(name, topic, lang="ko"):
             update_company(cid, {"agents": c['agents']})
             w = _welcome_msg(c['name'], c['topic'], c['agents'], lang)
             c['chat'].append({"type": "system", "from": "시스템", "emoji": "✅", "to": "", "text": w['ready']})
+            # Notify user: CEO is analyzing and building team
+            team_building_msg = {
+                "ko": "🔍 CEO가 주제를 분석하고 팀 구성안을 준비하고 있습니다... 잠시만 기다려주세요.",
+                "en": "🔍 CEO is analyzing the topic and preparing a team proposal... Please wait.",
+                "ja": "🔍 CEOがテーマを分析し、チーム構成を準備しています... しばらくお待ちください。",
+            }
+            c['chat'].append({"type": "system", "from": "시스템", "emoji": "🔍", "to": "", "text": team_building_msg.get(lang, team_building_msg['en'])})
             update_company(cid, {"chat": c['chat']})
+            sse_broadcast('company_update', {'id': cid, 'company': get_company(cid)})
+            # Show CEO as thinking
+            sse_broadcast('agent_thinking', {'cid': cid, 'agent_id': 'ceo'})
             # Generate SOUL.md SYNCHRONOUSLY before nudging CEO
-            # (so CEO has full context when proposing team)
             _generate_custom_soul_sync(ceo_aid, ceo_ws, ceo_nm, ceo_rl, co_name, co_topic, lang)
             # Then nudge CEO to propose team
             team_prompt = (
