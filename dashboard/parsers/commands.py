@@ -21,7 +21,7 @@ RE_CRON_UNIFIED = re.compile(r'\[CRON:(add|del):([^\]]+)\]')
 
 RE_APPROVAL = re.compile(r'\[APPROVAL:([^:\]]+):([^:\]]+)(?::([^\]]*))?\]')
 RE_MENTION = re.compile(r'@([A-Za-z\w]+)')
-RE_HAS_COMMAND = re.compile(r'\[TASK[_:]|\[APPROVAL:|\[CRON[_:]')
+RE_HAS_COMMAND = re.compile(r'\[TASK[_:]|\[APPROVAL:|\[CRON[_:]|\[HIRE:|\[FIRE:')
 
 APPROVAL_CATEGORIES = {
     '예산', '구매', '프로젝트', '인사', '정책', '기타',
