@@ -967,9 +967,9 @@ async function planAddSubmit(pid){
     const d=await r.json();if(d.ok){_planTasks.push(d.task);renderPlan()}else toast(t('toast.add_fail'))}catch(e){toast(t('toast.generic_error'))}
 }
 async function planCycle(id){
-  const t=_planTasks.find(x=>x.id===id);if(!t)return;
+  const node=_planTasks.find(x=>x.id===id);if(!node)return;
   const nxt={todo:'in-progress','in-progress':'done',done:'todo',blocked:'todo'};
-  t.status=nxt[t.status]||'todo';renderPlan();
+  node.status=nxt[node.status]||'todo';renderPlan();
   try{await fetch(`/api/plan-task-update/${cur}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,status:t.status})})}catch(e){}
 }
 async function planDel(id){

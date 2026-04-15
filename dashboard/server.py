@@ -410,6 +410,7 @@ def process_task_commands(cid, text, agent_id):
         if target['id'] == 'ceo':
             print(f"[fire] cannot fire CEO, skipping")
             continue
+        fire_detail = f"[FIRE_DATA:{target['id']}:{fire_name}]\nReason: {fire_reason}\nProposed by: {agent_name_from}\n\nApprove to remove this agent."
         approval = {
             'id': str(uuid.uuid4())[:8],
             'from_agent': agent_name_from,
@@ -417,9 +418,7 @@ def process_task_commands(cid, text, agent_id):
             'approval_type': 'fire',
             'category': 'hr',
             'title': f"Dismiss {target.get('emoji','')} {fire_name}",
-            'detail': f"Reason: {fire_reason}\nProposed by: {agent_name_from}\n\nApprove to remove this agent.",
-            'fire_agent_id': target['id'],
-            'fire_agent_name': fire_name,
+            'detail': fire_detail,
             'status': 'pending',
             'time': datetime.now().strftime('%H:%M'),
             'created_at': datetime.now().isoformat(),
@@ -2554,7 +2553,7 @@ def nudge_agent(cid, text, target):
                     if l.startswith('===') or l.startswith('---'):
                         return False
                     # Strip metadata lines starting with [ but NOT system commands
-                    if l.startswith('[') and not re.match(r'\[(TASK_|APPROVAL:|CRON_|TASK_DONE)', l):
+                    if l.startswith('[') and not re.match(r'\[(TASK[_:]|APPROVAL:|CRON[_:]|HIRE:|FIRE:)', l):
                         return False
                     return True
                 clean = '\n'.join(l for l in lines if _is_content_line(l)).strip()
@@ -3971,7 +3970,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             # If agent dismissal was approved, remove the agent
             if resolution == 'approved' and approval.get('approval_type') == 'fire':
                 company = get_company(cid)
-                fire_aid = approval.get('fire_agent_id', '')
+                # Parse [FIRE_DATA:agent_id:name] from detail
+                fire_aid = ''
+                detail = approval.get('detail', '')
+                fm = re.search(r'\[FIRE_DATA:([^:]+):([^\]]+)\]', detail)
+                if fm:
+                    fire_aid = fm.group(1).strip()
                 if company and fire_aid:
                     fire_agent_id = f"{cid}-{fire_aid}"
                     # Clear busy/queue state
@@ -4346,6 +4350,7 @@ async def api_agent_fire(cid: str, aid: str, request: Request):
     target = next((a for a in company.get('agents', []) if a['id'] == aid), None)
     if not target:
         return JSONResponse({"error": "agent not found"}, status_code=404)
+    fire_detail = f"[FIRE_DATA:{aid}:{target.get('name', aid)}]\nReason: {reason}"
     approval = {
         'id': str(uuid.uuid4())[:8],
         'from_agent': 'Master',
@@ -4353,9 +4358,7 @@ async def api_agent_fire(cid: str, aid: str, request: Request):
         'approval_type': 'fire',
         'category': 'hr',
         'title': f"Dismiss {target.get('emoji', '')} {target.get('name', aid)}",
-        'detail': f"Reason: {reason}",
-        'fire_agent_id': aid,
-        'fire_agent_name': target.get('name', aid),
+        'detail': fire_detail,
         'status': 'pending',
         'time': datetime.now().strftime('%H:%M'),
         'created_at': datetime.now().isoformat(),

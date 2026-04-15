@@ -405,9 +405,10 @@ def _migrate_hub_tables_to_meta(meta_conn):
         for r in rows:
             try:
                 company_conn.execute("""INSERT OR IGNORE INTO approvals
-                    (id,company_id,from_agent,from_emoji,approval_type,detail,status,time,created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (id,company_id,from_agent,from_emoji,approval_type,category,title,detail,status,time,created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                     (r['id'],cid,r['from_agent'],r['from_emoji'],r['approval_type'],
+                     r.get('category','general'),r.get('title',''),
                      r['detail'],r['status'],r['time'],r['created_at']))
             except Exception:
                 pass
@@ -897,10 +898,11 @@ def _save_approvals(conn, cid, approvals):
     conn.execute("DELETE FROM approvals WHERE company_id=?", (cid,))
     for a in approvals:
         conn.execute("""INSERT OR REPLACE INTO approvals
-            (id, company_id, from_agent, from_emoji, approval_type, detail, status, time, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (id, company_id, from_agent, from_emoji, approval_type, category, title, detail, status, time, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (a.get('id',''), cid, a.get('from_agent',''), a.get('from_emoji',''),
-             a.get('type','요청'), a.get('detail',''), a.get('status','pending'),
+             a.get('type', a.get('approval_type','요청')), a.get('category','general'), a.get('title',''),
+             a.get('detail',''), a.get('status','pending'),
              a.get('time',''), a.get('created_at','')))
 
 # ─── Activity Log ───
