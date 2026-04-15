@@ -1048,6 +1048,8 @@ def resolve_approval(cid, approval_id, resolution):
     approval = None
     for a in approvals:
         if a['id'] == approval_id:
+            if a.get('status') != 'pending':
+                return a  # Already resolved — idempotency guard
             a['status'] = resolution
             a['resolved_at'] = datetime.now().isoformat()
             approval = a
@@ -3713,7 +3715,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self._do_add_agent(cid, company, name, role, emoji, prompt, parent_agent, model)
 
     def _do_add_agent(self, cid, company, name, role, emoji, prompt, parent_agent='', model=''):
-        aid = re.sub(r'[^a-z0-9]', '-', name.lower())
+        aid = re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')
+        aid = re.sub(r'-+', '-', aid)  # collapse multiple dashes
+        if not aid:  # pure non-ASCII name (Korean, etc.)
+            aid = f"agent-{uuid.uuid4().hex[:8]}"
         agent_id = f"{cid}-{aid}"
         agent_workspace = DATA / cid / "workspaces" / aid
         company_lang = company.get('lang', 'ko')

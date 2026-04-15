@@ -154,7 +154,7 @@ async function load(){
   else{$('empty').style.display='none';$('dashboard').style.display='flex';$('bottom-bar').style.display='flex';$('drawer-btns').style.display='';if(!cur||!cos.find(c=>c.id===cur))sel(cos[0].id);else refresh()}
 }
 function renderTabs(){$('tabs').innerHTML=cos.map(c=>`<div class="tab ${c.id===cur?'active':''}" onclick="sel('${c.id}')">${_e(c.name)}<span class="x" onclick="event.stopPropagation();delCo('${c.id}','${_e(c.name)}')">✕</span></div>`).join('')}
-async function sel(id){cur=id;lastLen=0;selectedAgent=null;Object.keys(agentLog).forEach(k=>delete agentLog[k]);renderTabs();await refresh()}
+async function sel(id){cur=id;lastLen=0;selectedAgent=null;Object.keys(agentLog).forEach(k=>delete agentLog[k]);_threadCollapsed={};_planTasks=[];_planCollapsed=new Set();_planUserExpanded=new Set();renderTabs();await refresh()}
 
 let chatMessages=[];
 async function refresh(){
