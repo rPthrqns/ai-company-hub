@@ -982,20 +982,18 @@ async function planDel(id){
 // ─── CRUD ───
 function openCreate(){$('create-modal').classList.add('show')}
 async function createCo(){
-  const n=$('c-name').value.trim(),t=$('c-topic').value.trim();if(!n)return;
+  const coName=$('c-name').value.trim(),coTopic=$('c-topic').value.trim();if(!coName)return;
   const btn=document.querySelector('#create-modal .btn-primary');
   if(btn){btn.disabled=true;btn.textContent='⏳ CEO...'}
-  // Use first company's lang as default, fallback to localStorage lang
   const coLang=(cos.length&&cos[0].lang)?cos[0].lang:lang;
   try{
-    const r=await(await fetch('/api/companies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,topic:t,lang:coLang})})).json();
+    const r=await(await fetch('/api/companies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:coName,topic:coTopic,lang:coLang})})).json();
     if(r.ok){
       $('create-modal').classList.remove('show');$('c-name').value='';$('c-topic').value='';
       const agentCount=(r.company.agents||[]).length;
       cur=r.company.id;load();
-      // CEO-first model: only 1 agent initially, lock briefly
       _setCmdBarLock(true,'⏳ CEO...');
-      toast(`🏢 ${n}`);
+      toast(`🏢 ${coName}`);
       _watchAgentReady(r.company.id,agentCount);
     }else toast(t('toast.create_fail'));
   }catch(e){toast(t('toast.create_error'))}
