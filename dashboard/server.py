@@ -3029,9 +3029,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             lang = body.get('lang', 'ko')
             if lang not in LANG:
                 lang = 'ko'
-            existing = db_get_all_companies()
-            if len(existing) >= 20:
-                self._json({"error": "max 20 companies"}, 400); return
             company = create_company(name, topic, lang)
             self._json({"ok": True, "company": company})
 
@@ -4191,10 +4188,7 @@ async def api_upload_file(cid: str, request: Request):
     if not safe_name or safe_name.strip('.') == '':
         safe_name = f"upload_{uuid.uuid4().hex[:8]}"
     dest = dest_dir / safe_name
-    MAX_UPLOAD = 10 * 1024 * 1024  # 10MB
     content = await uploaded.read()
-    if len(content) > MAX_UPLOAD:
-        raise HTTPException(status_code=413, detail=f"File too large ({len(content)//1024//1024}MB). Max 10MB.")
     with open(dest, 'wb') as f:
         f.write(content)
     rel_path = f"_shared/deliverables/{safe_name}"
@@ -4280,10 +4274,6 @@ async def api_create_company(request: Request):
     lang = body.get('lang', 'ko')
     if lang not in LANG:
         lang = 'ko'
-    # Limit total companies
-    existing = db_get_all_companies()
-    if len(existing) >= 20:
-        raise HTTPException(status_code=400, detail="Maximum 20 companies reached")
     company = create_company(name, topic, lang)
     return {"ok": True, "company": company}
 
