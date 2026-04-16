@@ -1810,9 +1810,11 @@ def create_company(name, topic, lang="ko"):
     companies = db_get_all_companies()
     slug = re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')
     if not slug: slug = 'company'
-    company_id = slug + "-" + datetime.now().strftime('%m%d%H%M')
-    if company_id in _RECENTLY_DELETED:
-        company_id = slug + "-" + datetime.now().strftime('%m%d%H%M%S')
+    company_id = slug + "-" + datetime.now().strftime('%m%d%H%M%S')
+    # Ensure uniqueness even on concurrent requests
+    existing_ids = {c['id'] for c in companies}
+    while company_id in existing_ids or company_id in _RECENTLY_DELETED:
+        company_id = slug + "-" + datetime.now().strftime('%m%d%H%M%S') + "-" + uuid.uuid4().hex[:4]
 
     # ── CEO-first model: only create CEO, then CEO proposes team ──
     ceo_t = AGENT_TEMPLATES.get('ceo', {"name": "CEO", "emoji": "👔", "role": {"ko": "총괄", "en": "Executive"}})
@@ -3023,10 +3025,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             name = body.get('name', '').strip()
             if not name or len(name) > 100:
                 self._json({"error": "name must be 1-100 characters"}, 400); return
+            topic = (body.get('topic', '') or '')[:500]
             lang = body.get('lang', 'ko')
             if lang not in LANG:
                 lang = 'ko'
-            company = create_company(name, body.get('topic',''), lang)
+            existing = db_get_all_companies()
+            if len(existing) >= 20:
+                self._json({"error": "max 20 companies"}, 400); return
+            company = create_company(name, topic, lang)
             self._json({"ok": True, "company": company})
 
         elif path.startswith('/api/chat/'):
@@ -3698,7 +3704,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         name = body.get('name', '').strip()
         role = body.get('role', '').strip()
-        emoji = body.get('emoji', '🤖')
+        emoji = body.get('emoji', '🤖')[:4]  # limit emoji to 4 chars (prevents HTML injection)
         prompt = body.get('prompt', '').strip()
         if not name or not role: self._json({"error": "name and role required"}, 400); return
 
@@ -4185,8 +4191,11 @@ async def api_upload_file(cid: str, request: Request):
     if not safe_name or safe_name.strip('.') == '':
         safe_name = f"upload_{uuid.uuid4().hex[:8]}"
     dest = dest_dir / safe_name
+    MAX_UPLOAD = 10 * 1024 * 1024  # 10MB
+    content = await uploaded.read()
+    if len(content) > MAX_UPLOAD:
+        raise HTTPException(status_code=413, detail=f"File too large ({len(content)//1024//1024}MB). Max 10MB.")
     with open(dest, 'wb') as f:
-        content = await uploaded.read()
         f.write(content)
     rel_path = f"_shared/deliverables/{safe_name}"
     print(f"[upload] {cid}: {safe_name} ({len(content)} bytes)")
@@ -4267,10 +4276,15 @@ async def api_create_company(request: Request):
     name = body.get('name', '').strip()
     if not name or len(name) > 100:
         raise HTTPException(status_code=400, detail="name must be 1-100 characters")
+    topic = (body.get('topic', '') or '')[:500]  # limit topic length
     lang = body.get('lang', 'ko')
     if lang not in LANG:
         lang = 'ko'
-    company = create_company(name, body.get('topic', ''), lang)
+    # Limit total companies
+    existing = db_get_all_companies()
+    if len(existing) >= 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 companies reached")
+    company = create_company(name, topic, lang)
     return {"ok": True, "company": company}
 
 @app.post("/api/company/delete")

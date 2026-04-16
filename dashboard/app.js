@@ -213,7 +213,7 @@ function renderIconGrid(){
     const costStr=cost>0?`$${cost.toFixed(4)}`:'';
     const canFire=a.id!=='ceo';
     return`<div class="agent-icon s-${st}" onclick="selectAgent('${a.id}')" ondblclick="event.preventDefault();openPersona('${a.id}')" oncontextmenu="event.preventDefault();${canFire?`fireAgent('${a.id}')`:''}" title="${_e(a.name)} — dblclick: persona, right-click: dismiss">
-      <div class="ai-circle">${a.emoji||'🤖'}<span class="ai-dot"></span></div>
+      <div class="ai-circle">${_e(a.emoji||'🤖')}<span class="ai-dot"></span></div>
       <span class="ai-name">${_e(a.name)}</span>
       ${costStr?`<span class="ai-cost">${costStr}</span>`:''}
       ${busy?`<button class="ai-stop" onclick="event.stopPropagation();stopAgent('${a.id}')" title="Stop">■</button>`:''}
@@ -361,7 +361,7 @@ function _renderMsg(m, agentMap){
     }
   }
   return`<div class="chat-msg ${cls}">
-    <span class="cm-avatar">${emoji}</span>
+    <span class="cm-avatar">${_e(emoji)}</span>
     <div class="cm-body">
       <div class="cm-name">${_e(name)}</div>
       <div class="cm-text">${textHtml}</div>
@@ -691,7 +691,7 @@ async function renderDashboard(){
           <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:2px"></div>
         </div>
         <div style="display:flex;gap:3px;margin-top:8px;flex-wrap:wrap">
-          ${agents.map(a=>`<span style="font-size:14px" title="${_e(a.name)}">${a.emoji||'🤖'}</span>`).join('')}
+          ${agents.map(a=>`<span style="font-size:14px" title="${_e(a.name)}">${_e(a.emoji||'🤖')}</span>`).join('')}
         </div>
       </div>`;
     }).join('')+'</div>';
