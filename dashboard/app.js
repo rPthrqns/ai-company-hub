@@ -613,10 +613,11 @@ function renderDrawerFiles(el){
       const isText=['md','txt','json','csv','html','css','js','py'].includes(ext);
       const icon=isImg?'🖼️':ext==='md'?'📝':ext==='json'?'📋':ext==='py'?'🐍':'📄';
       const url=`/api/file/${cur}/${f.path}`;
+      const safeUrl=url.replace(/'/g,"\\'").replace(/"/g,'&quot;');
       let preview='';
-      if(isImg)preview=`<img src="${url}" style="max-width:100%;max-height:120px;border-radius:4px;margin-top:4px;display:block;cursor:pointer" onclick="event.stopPropagation();window.open('${url}','_blank')">`;
-      const previewBtn=isText?`<button onclick="event.stopPropagation();previewFile('${url}','${ext}')" style="background:none;border:1px solid #374151;color:var(--dim);border-radius:4px;padding:1px 5px;font-size:8px;cursor:pointer;flex-shrink:0">preview</button>`:'';
-      return`<div class="file-item" style="flex-direction:column;align-items:flex-start" onclick="window.open('${url}','_blank')">
+      if(isImg)preview=`<img src="${_e(url)}" style="max-width:100%;max-height:120px;border-radius:4px;margin-top:4px;display:block;cursor:pointer" onclick="event.stopPropagation();window.open('${safeUrl}','_blank')">`;
+      const previewBtn=isText?`<button onclick="event.stopPropagation();previewFile('${safeUrl}','${ext}')" style="background:none;border:1px solid #374151;color:var(--dim);border-radius:4px;padding:1px 5px;font-size:8px;cursor:pointer;flex-shrink:0">preview</button>`:'';
+      return`<div class="file-item" style="flex-direction:column;align-items:flex-start" onclick="window.open('${safeUrl}','_blank')">
         <div style="display:flex;align-items:center;gap:6px;width:100%"><span>${icon}</span><span style="flex:1;color:#60a5fa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_e(f.path)}</span>${previewBtn}<span style="color:var(--dim);font-size:8px">${f.modified||''}</span></div>
         ${preview}
       </div>`}).join('');

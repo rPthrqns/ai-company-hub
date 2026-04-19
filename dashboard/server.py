@@ -1071,8 +1071,9 @@ def resolve_approval(cid, approval_id, resolution):
         if resolution == 'approved' and approval.get('type') == 'budget_exceeded':
             old_budget = company.get('budget', DEFAULT_BUDGET)
             company = get_company(cid)
-            company['budget'] = round(old_budget * 1.5, 2)
-            update_company(cid, {'budget': company['budget']})
+            if company:
+                company['budget'] = round(old_budget * 1.5, 2)
+                update_company(cid, {'budget': company['budget']})
     return approval
 
 # ─── Agent Registration & Workspace ───
@@ -1554,7 +1555,8 @@ def start_task_thread(cid, task):
                 _running_task_threads.discard(key)
                 break
             interval = max(t.get('interval_minutes', 1440), 1)
-            new_next = (datetime.now() + __import__('datetime').timedelta(minutes=interval)).isoformat()
+            from datetime import timedelta as _td
+            new_next = (datetime.now() + _td(minutes=interval)).isoformat()
             for x in tasks:
                 if x['id'] == t['id']:
                     x['next_run'] = new_next
