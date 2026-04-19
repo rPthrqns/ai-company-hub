@@ -253,6 +253,9 @@ def extract_task_from_instruction(text, lang="ko"):
 def process_task_commands(cid, text, agent_id):
     """에이전트 응답에서 [TASK_XXX:...] 명령을 파싱해서 칸반에 반영.
     Pure parsing is delegated to parsers.commands; this function only does DB I/O."""
+    # Strip code blocks before parsing commands (prevents examples from being executed)
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    text = re.sub(r'`[^`]+`', '', text)
     results = []
     board_tasks = db_get_tasks(cid)
 
@@ -3197,8 +3200,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not snap: self._json({"error": "snapshot not found"}, 404); return
         data = snap['data']
         new_name = body.get('name', f"{data.get('name','회사')} (포크)").strip()[:100]
+        import copy
         new_cid = f"fork-{uuid.uuid4().hex[:8]}"
-        fork_company = dict(data)
+        fork_company = copy.deepcopy(data)
         fork_company['id'] = new_cid
         fork_company['name'] = new_name
         fork_company['status'] = 'starting'
@@ -3217,7 +3221,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         snap = db_get_snapshot(snap_id)
         if not snap: self._json({"error": "snapshot not found"}, 404); return
         if not cid or not get_company(cid): self._json({"error": "company not found"}, 404); return
-        data = dict(snap['data'])
+        import copy
+        data = copy.deepcopy(snap['data'])
         data['id'] = cid  # Keep original ID
         save_company(data)
         refreshed = get_company(cid)
@@ -3311,6 +3316,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         text = str(body.get('text', '') or '').strip()
         if not all([from_cid, to_cid, text]):
             self._json({"error": "from_cid, to_cid, text required"}, 400); return
+        if from_cid == to_cid:
+            self._json({"error": "cannot outsource to self"}, 400); return
         from_company = get_company(from_cid)
         to_company = get_company(to_cid)
         if not from_company: self._json({"error": f"company not found: {from_cid}"}, 404); return
@@ -4982,6 +4989,9 @@ def api_get_budgets(cid: str):
 @app.post("/api/budget-set/{cid}")
 async def api_set_budget(cid: str, request: Request):
     body = await request.json()
+    # Ensure budget values are non-negative
+    if 'allocated' in body:
+        body['allocated'] = max(0, float(body.get('allocated', 0) or 0))
     b = db_set_budget(cid, body)
     db_add_audit(cid, 'budget_set', 'master', body.get('department',''), f'allocated={body.get("allocated",0)}')
     return {"ok": True, "budget": b}
